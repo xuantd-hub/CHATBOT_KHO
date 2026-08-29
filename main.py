@@ -21,7 +21,7 @@ app.add_middleware(
 )
 
 SHEET_ID = "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag"
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6JP-EMgvXr4eHKpYwW0_uzJANzcXn0gX1BCLi7gtjdfjg") 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") 
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
