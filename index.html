@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>XuanTech AI - Trợ Lý Sự Cố Thiết Bị</title>
+    <title>CHATBOT_KHO - Trợ Lý Sự Cố Thiết Bị</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -17,11 +17,11 @@
     <header class="bg-indigo-900 text-white px-4 py-3 flex items-center justify-between shadow-md">
         <div class="flex items-center space-x-3">
             <div class="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-xl border-2 border-indigo-400">
-                XT
+                CK
             </div>
             <div>
                 <h1 class="font-bold text-lg leading-tight flex items-center gap-2">
-                    XuanTech AI <span class="text-xs bg-indigo-700 text-indigo-200 px-2 py-0.5 rounded-full border border-indigo-500">TD-Bot</span>
+                    CHATBOT_KHO <span class="text-xs bg-indigo-700 text-indigo-200 px-2 py-0.5 rounded-full border border-indigo-500">TD-Bot</span>
                 </h1>
                 <p class="text-xs text-indigo-300">Tác giả: Thái Đình Xuân (XuanTD)</p>
             </div>
@@ -65,11 +65,11 @@
     <main id="chat-box" class="flex-1 overflow-y-auto p-4 space-y-4 max-w-4xl mx-auto w-full">
         <div class="flex items-start gap-3">
             <div class="w-8 h-8 rounded-full bg-indigo-900 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
-                XT
+                CK
             </div>
             <div class="bg-white p-4 rounded-2xl rounded-tl-none border border-slate-200 shadow-sm max-w-2xl text-slate-800 text-sm leading-relaxed space-y-2">
                 <p class="font-bold text-indigo-900 flex items-center gap-1.5">
-                    Xin chào! Em là XuanTech AI (TD-Bot) 👋
+                    Xin chào! Em là CHATBOT_KHO (TD-Bot) 👋
                 </p>
                 <p>Em hỗ trợ chẩn đoán sự cố, hướng dẫn cài đặt máy in, máy quét, máy POS và khay tiền.</p>
                 <p class="text-xs text-slate-500 bg-slate-50 p-2 rounded-lg border border-slate-100">
@@ -126,11 +126,10 @@
 
     <!-- SCRIPT TƯƠNG TÁC -->
     <script>
-        const BACKEND_URL = "https://chatbot-kho.onrender.com";
+        const BACKEND_URL = "https://xuantech-ai-backend.onrender.com";
         let currentRole = "Khach_Hang";
-        let chatHistory = []; // Mảng lưu trữ toàn bộ lịch sử cuộc trò chuyện
+        let chatHistory = [];
 
-        // Cấu hình Marked.js ép tất cả Link mở sang Tab mới
         const renderer = new marked.Renderer();
         renderer.link = function(href, title, text) {
             const linkUrl = (typeof href === 'object') ? href.href : href;
@@ -150,9 +149,7 @@
         
         async function autoReloadSheetData() {
             try {
-                const res = await fetch(`${BACKEND_URL}/reload`, {
-                    headers: { "ngrok-skip-browser-warning": "true" }
-                });
+                const res = await fetch(`${BACKEND_URL}/reload`);
                 if (res.ok) {
                     const timeStr = getCurrentTimeString();
                     document.getElementById("last-sync-time").innerText = `Vừa cập nhật: ${timeStr} (Ngầm)`;
@@ -169,9 +166,7 @@
             const icon = document.getElementById("icon-reload");
             icon.classList.add("fa-spin");
             try {
-                const res = await fetch(`${BACKEND_URL}/reload`, {
-                    headers: { "ngrok-skip-browser-warning": "true" }
-                });
+                const res = await fetch(`${BACKEND_URL}/reload`);
                 const data = await res.json();
                 const timeStr = getCurrentTimeString();
                 document.getElementById("last-sync-time").innerText = `Vừa cập nhật: ${timeStr} (Thủ công)`;
@@ -233,7 +228,6 @@
 
             const chatBox = document.getElementById("chat-box");
 
-            // Render tin nhắn User
             const userMsgHtml = `
                 <div class="flex items-start gap-3 justify-end">
                     <div class="bg-indigo-700 text-white p-3.5 rounded-2xl rounded-tr-none shadow-sm max-w-xl text-sm leading-relaxed">
@@ -248,15 +242,13 @@
             inputEl.value = "";
             chatBox.scrollTop = chatBox.scrollHeight;
 
-            // Lưu vào mảng Lịch sử chat
             chatHistory.push({ role: "user", text: text });
 
-            // Render khung AI chờ
             const aiMsgId = "ai-msg-" + Date.now();
             const aiMsgHtml = `
                 <div class="flex items-start gap-3">
                     <div class="w-8 h-8 rounded-full bg-indigo-900 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
-                        XT
+                        CK
                     </div>
                     <div class="bg-white p-4 rounded-2xl rounded-tl-none border border-slate-200 shadow-sm max-w-2xl text-slate-800 text-sm leading-relaxed space-y-2 relative group">
                         <div id="${aiMsgId}" class="markdown-body space-y-2">
@@ -272,12 +264,10 @@
             chatBox.scrollTop = chatBox.scrollHeight;
 
             try {
-                // Gửi mảng chatHistory qua phương thức POST
                 const response = await fetch(`${BACKEND_URL}/chat`, {
                     method: "POST",
                     headers: {
-                        "Content-Type": "application/json",
-                        "ngrok-skip-browser-warning": "true"
+                        "Content-Type": "application/json"
                     },
                     body: JSON.stringify({
                         messages: chatHistory,
@@ -299,7 +289,6 @@
                     chatBox.scrollTop = chatBox.scrollHeight;
                 }
 
-                // Lưu phản hồi của AI vào mảng Lịch sử chat
                 chatHistory.push({ role: "model", text: fullText });
 
             } catch (err) {

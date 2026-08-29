@@ -7,9 +7,8 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import google.generativeai as genai
 
-app = FastAPI(title="XuanTech AI Engine", version="6.0")
+app = FastAPI(title="CHATBOT_KHO Engine", version="7.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,10 +19,6 @@ app.add_middleware(
 
 SHEET_ID = "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-
-# Cấu hình API Key tương thích 100% với cả mã AQ... lẫn AIzaSy...
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
 
 RAM_CACHE = {}
 TABS = [
@@ -98,7 +93,7 @@ def chat_stream(req: ChatRequest):
     compact_knowledge = filter_relevant_knowledge(latest_msg)
 
     system_instruction = f"""
-    Bạn là XuanTech AI (TD-Bot) – Trợ lý tư vấn & chẩn đoán sự cố thiết bị phần cứng.
+    Bạn là CHATBOT_KHO (TD-Bot) – Trợ lý tư vấn & chẩn đoán sự cố thiết bị phần cứng.
     TÁC GIẢ & CHỊU TRÁCH NHIỆM: Anh Thái Đình Xuân (XuanTD) - Leader Quản lý & Phát triển thiết bị.
 
     QUY TẮC PHẢN HỒI:
@@ -114,35 +109,52 @@ def chat_stream(req: ChatRequest):
     {compact_knowledge}
     """
 
-    # Chuyển đổi lịch sử chat sang định dạng google-generativeai
-    contents = []
+    # Chuyển đổi định dạng tin nhắn chuẩn REST API
+    gemini_contents = []
     for m in req.messages:
         role_type = "user" if m["role"] == "user" else "model"
-        contents.append({"role": role_type, "parts": [m["text"]]})
+        gemini_contents.append({
+            "role": role_type,
+            "parts": [{"text": m["text"]}]
+        })
+
+    # REST Endpoint trực tiếp xử lý tốt mã API Key AQ.
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse"
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+    }
+    payload = {
+        "systemInstruction": {
+            "parts": [{"text": system_instruction}]
+        },
+        "contents": gemini_contents,
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": 600
+        }
+    }
 
     def generate():
         try:
-            model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
-                system_instruction=system_instruction
-            )
-            
-            generation_config = genai.types.GenerationConfig(
-                temperature=0.2,
-                max_output_tokens=600,
-            )
-            
-            response = model.generate_content(
-                contents,
-                generation_config=generation_config,
-                stream=True
-            )
-            
-            for chunk in response:
-                if chunk.text:
-                    yield chunk.text
+            res = requests.post(url, headers=headers, json=payload, stream=True, timeout=15)
+            if res.status_code != 200:
+                yield f"❌ Lỗi {res.status_code}: {res.text}"
+                return
+
+            for line in res.iter_lines():
+                if line:
+                    decoded = line.decode('utf-8')
+                    if decoded.startswith('data: '):
+                        data_str = decoded[6:]
+                        try:
+                            data_json = json.loads(data_str)
+                            chunk = data_json['candidates'][0]['content']['parts'][0]['text']
+                            yield chunk
+                        except Exception:
+                            pass
         except Exception as err:
-            yield f"❌ Lỗi: {str(err)}"
+            yield f"❌ Lỗi kết nối: {str(err)}"
 
     return StreamingResponse(
         generate(), 
