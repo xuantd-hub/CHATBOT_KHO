@@ -121,7 +121,7 @@ def chat_stream(req: ChatRequest):
             "parts": [{"text": m["text"]}]
         })
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
     headers = {
         "Content-Type": "application/json"
     }
