@@ -7,12 +7,10 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 
-app = FastAPI(title="XuanTech AI Engine", version="5.0")
+app = FastAPI(title="XuanTech AI Engine", version="6.0")
 
-# Cấu hình CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,9 +19,11 @@ app.add_middleware(
 )
 
 SHEET_ID = "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag"
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+# Cấu hình API Key tương thích 100% với cả mã AQ... lẫn AIzaSy...
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 RAM_CACHE = {}
 TABS = [
@@ -33,7 +33,6 @@ TABS = [
 ]
 
 def load_sheet_data():
-    """Tải và nạp dữ liệu từ Google Sheets về RAM Cache"""
     global RAM_CACHE
     temp_cache = {}
     for tab in TABS:
@@ -56,7 +55,7 @@ def load_sheet_data():
             temp_cache[tab] = []
             
     RAM_CACHE = temp_cache
-    print("✅ Đã nạp & tối ưu dữ liệu Google Sheet vào RAM!")
+    print("✅ Đã nạp thành công dữ liệu Google Sheet vào RAM!")
     return {"status": "success", "loaded_tabs": list(RAM_CACHE.keys())}
 
 @app.on_event("startup")
@@ -68,11 +67,10 @@ def reload_data():
     return load_sheet_data()
 
 class ChatRequest(BaseModel):
-    messages: list  # Cấu trúc: [{"role": "user"/"model", "text": "..."}]
+    messages: list
     role: str = "Khach_Hang"
 
 def filter_relevant_knowledge(latest_user_msg: str) -> str:
-    """Bộ lọc Mini-RAG: Chỉ trích xuất thông tin liên quan nhất từ RAM"""
     query_words = [w.lower() for w in latest_user_msg.split() if len(w) > 1]
     filtered_data = {}
 
@@ -103,7 +101,7 @@ def chat_stream(req: ChatRequest):
     Bạn là XuanTech AI (TD-Bot) – Trợ lý tư vấn & chẩn đoán sự cố thiết bị phần cứng.
     TÁC GIẢ & CHỊU TRÁCH NHIỆM: Anh Thái Đình Xuân (XuanTD) - Leader Quản lý & Phát triển thiết bị.
 
-    QUY TẮC PHẢN HỒI (ƯU TIÊN TRỌNG TÂM & TỐC ĐỘ):
+    QUY TẮC PHẢN HỒI:
     1. BÁM SÁT MỤC TIÊU BAN ĐẦU: Đọc kỹ lịch sử hội thoại. Nếu người dùng đang hỏi khắc phục LỖI (vd: không in được) và vừa cung cấp tên MODEL (vd: SPR02), BẮT BUỘC chỉ trả về đúng các bước khắc phục LỖI KHÔNG IN ĐƯỢC cho model SPR02 đó. Tuyệt đối KHÔNG xuất ra tài liệu cài đặt, giới thiệu hay các lỗi không liên quan.
     2. NGẮN GỌN & ĐI THẲNG VÀO ĐÁP ÁN: Trả lời trong 3-5 bước hành động chính. Không viết dài dòng giải thích.
     3. HÌNH ẢNH & ĐƯỜNG LINK: Render ảnh Markdown `![mô tả](URL)` nếu kho tri thức có link ảnh lỗi/tem. Đính kèm link driver/video nếu có.
@@ -116,28 +114,30 @@ def chat_stream(req: ChatRequest):
     {compact_knowledge}
     """
 
-    # Chuyển đổi mảng lịch sử trò chuyện sang định dạng chuẩn SDK Gemini
-    gemini_contents = []
+    # Chuyển đổi lịch sử chat sang định dạng google-generativeai
+    contents = []
     for m in req.messages:
         role_type = "user" if m["role"] == "user" else "model"
-        gemini_contents.append(
-            types.Content(
-                role=role_type, 
-                parts=[types.Part.from_text(text=m["text"])]
-            )
-        )
+        contents.append({"role": role_type, "parts": [m["text"]]})
 
     def generate():
         try:
-            response = client.models.generate_content_stream(
-                model='gemini-2.5-flash',
-                contents=gemini_contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    temperature=0.2,
-                    max_output_tokens=600, # Ép thời gian phản hồi dưới 2-3s
-                )
+            model = genai.GenerativeModel(
+                model_name="gemini-1.5-flash",
+                system_instruction=system_instruction
             )
+            
+            generation_config = genai.types.GenerationConfig(
+                temperature=0.2,
+                max_output_tokens=600,
+            )
+            
+            response = model.generate_content(
+                contents,
+                generation_config=generation_config,
+                stream=True
+            )
+            
             for chunk in response:
                 if chunk.text:
                     yield chunk.text
