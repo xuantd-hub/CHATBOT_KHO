@@ -118,7 +118,7 @@ def chat_stream(req: ChatRequest):
         })
 
     # Cấu hình endpoint gọi Key AQ... trực tiếp qua tham số query ?key=
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
     headers = {
         "Content-Type": "application/json"
     }
