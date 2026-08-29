@@ -3,12 +3,13 @@ import io
 import json
 import pandas as pd
 import requests
+import httpx
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Engine", version="9.0")
+app = FastAPI(title="Trợ Lý KHO Engine", version="10.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -88,7 +89,7 @@ def filter_relevant_knowledge(latest_user_msg: str) -> str:
     return json.dumps(filtered_data, ensure_ascii=False, separators=(',', ':'))
 
 @app.post("/chat")
-def chat_stream(req: ChatRequest):
+async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
     compact_knowledge = filter_relevant_knowledge(latest_msg)
 
@@ -122,13 +123,9 @@ def chat_stream(req: ChatRequest):
         })
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
-    headers = {
-        "Content-Type": "application/json"
-    }
+    headers = {"Content-Type": "application/json"}
     payload = {
-        "systemInstruction": {
-            "parts": [{"text": system_instruction}]
-        },
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": gemini_contents,
         "generationConfig": {
             "temperature": 0.2,
@@ -136,26 +133,23 @@ def chat_stream(req: ChatRequest):
         }
     }
 
-    def generate():
-        try:
-            res = requests.post(url, headers=headers, json=payload, stream=True, timeout=20)
-            if res.status_code != 200:
-                yield f"❌ Lỗi {res.status_code}: {res.text}"
-                return
+    async def generate():
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=60.0)) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                if response.status_code != 200:
+                    err_body = await response.aread()
+                    yield f"❌ Lỗi {response.status_code}: {err_body.decode('utf-8')}"
+                    return
 
-            for line in res.iter_lines():
-                if line:
-                    decoded = line.decode('utf-8')
-                    if decoded.startswith('data: '):
-                        data_str = decoded[6:]
+                async for line in response.aiter_lines():
+                    if line and line.startswith("data: "):
+                        data_str = line[6:]
                         try:
                             data_json = json.loads(data_str)
                             chunk = data_json['candidates'][0]['content']['parts'][0]['text']
                             yield chunk
                         except Exception:
                             pass
-        except Exception as err:
-            yield f"❌ Lỗi kết nối: {str(err)}"
 
     return StreamingResponse(
         generate(), 
