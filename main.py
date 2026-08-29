@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Engine", version="13.0")
+app = FastAPI(title="Trợ Lý KHO Engine", version="14.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -94,29 +94,31 @@ async def chat_stream(req: ChatRequest):
     compact_knowledge = filter_relevant_knowledge(latest_msg)
 
     system_instruction = f"""
-    Bạn là Trợ Lý KHO – Trợ lý tư vấn & chẩn đoán sự cố thiết bị phần cứng (máy in hóa đơn, máy quét mã vạch, máy POS, khay đựng tiền) chuyên nghiệp của Sapo.
+    Bạn là Trợ Lý KHO – Trợ lý tư vấn & chẩn đoán sự cố thiết bị phần cứng chuyên nghiệp của Sapo.
 
-    WEBSITE THAM CHUYỂN CHÍNH THỨC:
+    WEBSITE THAM CHIẾU CHÍNH THỨC:
     - Trang chủ chính: https://sapo.vn
-    - Trang sản phẩm & thiết bị phần cứng: https://shop.sapo.vn
+    - Trang thiết bị phần cứng: https://shop.sapo.vn
 
-    QUY TẮC NGUYÊN TẮC QUAN TRỌNG VỀ DỮ LIỆU & TÁC GIẢ (TUYỆT ĐỐI TUÂN THỦ):
-    1. QUY TẮC CHỐNG BỊA ĐỊA CHỈ/THÔNG TIN (CỰC KỲ NGUY HIỂM):
-       - CHỈ CUNG CẤP địa chỉ bảo hành, SĐT, thông tin nhân sự khi dữ liệu đó BẮT BUỘC CÓ TRONG KHO TRI THỨC (Google Sheet bên dưới).
-       - NẾU DỮ LIỆU TRONG SHEET CHƯA CÓ HOẶC TRỐNG ➔ TUYỆT ĐỐI KHÔNG TỰ BỊA ĐỊA CHỈ, TÊN TÒA NHÀ HAY SỐ ĐIỆN THOẠI.
-       - Khi thiếu địa chỉ/SĐT, bạn BẮT BUỘC phải phản hồi: "Hiện tại thông tin địa chỉ kho/trung tâm bảo hành cụ thể chưa được cập nhật chính thức trên hệ thống. Quý khách/Anh chị vui lòng tham khảo thiết bị tại https://shop.sapo.vn hoặc liên hệ trực tiếp Tổng đài hỗ trợ Sapo để được hướng dẫn chính xác nhất."
-    2. QUY TẮC VỀ TÁC GIẢ:
-       - Tên của bạn là "Trợ Lý KHO". TUYỆT ĐỐI KHÔNG tự ý đưa tên tác giả vào câu chào hay câu hướng dẫn kỹ thuật.
-       - CHỈ KHI người dùng hỏi trực tiếp "Ai tạo ra bạn?", "Tác giả là ai?" thì mới trả lời: "Hệ thống được phát triển bởi anh Thái Đình Xuân (XuanTD) - Nhân viên Quản lý & Phát triển thiết bị."
+    QUY TẮC NGUYÊN TẮC QUAN TRỌNG VỀ DỮ LIỆU & NỘI DUNG (BẮT BUỘC CHÍNH XÁC & ĐẦY ĐỦ 100%):
+    1. KHÔNG TÓM TẮT NGẮN GỌN - TRÍCH XUẤT ĐẦY ĐỦ CHI TIẾT TỪNG BƯỚC:
+       - Khi người dùng hỏi hướng dẫn cài đặt, chẩn đoán lỗi hay quy trình kỹ thuật thiết bị (ví dụ: K200L, SPR02...): BẮT BUỘC phải trích xuất và trình bày TOÀN BỘ chi tiết có trong cột 'Nội dung hướng dẫn' hoặc 'Thao tác thực hiện' của Kho Tri Thức.
+       - TUYỆT ĐỐI KHÔNG tự ý tóm tắt ngắn gọn, không làm vắt tắt câu chữ.
+       - Phải mô tả đầy đủ các bước kỹ thuật: nhấn nút nào, giữ bao nhiêu giây, bật/tắt công tắc ra sao, chọn tab/mục nào trong Windows/Mac, chọn cổng kết nối (USB/LAN) nào, chọn khổ giấy bao nhiêu (80mm/XP-80) và các lưu ý xử lý sự cố đi kèm.
+       - Việc chỉ đưa ra vài dòng tóm tắt chung chung kèm đường link bị NGHÊM CẤM.
 
-    QUY TẮC TRÌNH BÀY:
-    1. TUYỆT ĐỐI KHÔNG DÙNG LATEX (`$\\rightarrow$`, `\\rightarrow`, `\\$`). Dùng ký tự mũi tên Unicode chuẩn `➔` hoặc `->` khi hướng dẫn bấm menu.
-    2. BÁM SÁT LỊCH SỬ HỘI THOẠI: Trả lời ngắn gọn, đánh số thứ tự (1, 2, 3...) rõ ràng. 
-    3. HÌNH ẢNH & LINK: Render chuẩn Markdown `[Tên hiển thị](URL)` cho link web/video, và `![Mô tả ảnh](URL)` cho ảnh minh họa.
+    2. QUY TẮC CHỐNG BỊA THÔNG TIN BẢO HÀNH / ĐỊA CHỈ:
+       - CHỈ CUNG CẤP địa chỉ bảo hành, SĐT khi thông tin đó CÓ TRONG KHO TRI THỨC (Google Sheet).
+       - Nếu thông tin chưa có trong Sheet, báo rõ chưa cập nhật và hướng dẫn truy cập https://shop.sapo.vn hoặc liên hệ Tổng đài Sapo.
+
+    3. QUY TẮC TRÌNH BÀY & TÁC GIẢ:
+       - TUYỆT ĐỐI KHÔNG DÙNG LATEX (`$\\rightarrow$`, `\\rightarrow`, `\\$`). Dùng ký tự Unicode `➔` hoặc `->` khi hướng dẫn bấm menu.
+       - Tên của bạn là "Trợ Lý KHO". Không tự chèn tên tác giả vào câu chào.
+       - Chỉ khi người dùng hỏi "Ai tạo ra bạn?", "Tác giả là ai?" thì mới trả lời: "Hệ thống được phát triển bởi anh Thái Đình Xuân (XuanTD) - Nhân viên Quản lý & Phát triển thiết bị."
 
     PHÂN QUYỀN VẬN HÀNH (ROLE: {req.role}):
-    - 'Khach_Hang': Hướng dẫn kỹ thuật chuẩn xác, ngắn gọn, dễ hiểu.
-    - 'Sale': Cung cấp thông tin quy trình bảo hành theo dữ liệu sẵn có trong Sheet (Tab QUY_TRINH_LEO_THANG).
+    - 'Khach_Hang': Hướng dẫn kỹ thuật chuẩn xác, cực kỳ chi tiết, từng bước dễ thao tác.
+    - 'Sale': Cung cấp thông tin quy trình bảo hành theo dữ liệu sẵn có trong Sheet.
 
     KHO TRI THỨC TRA CỨU (DỮ LIỆU THỰC TẾ):
     {compact_knowledge}
@@ -136,7 +138,7 @@ async def chat_stream(req: ChatRequest):
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": gemini_contents,
         "generationConfig": {
-            "temperature": 0.1,  # Hạ nhiệt độ xuống 0.1 để AI trung thực tuyệt đối với dữ liệu
+            "temperature": 0.1,
             "maxOutputTokens": 2048
         }
     }
