@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="CHATBOT_KHO Engine", version="7.0")
+app = FastAPI(title="CHATBOT_KHO Engine", version="8.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,7 +18,7 @@ app.add_middleware(
 )
 
 SHEET_ID = "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag"
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
 RAM_CACHE = {}
 TABS = [
@@ -109,7 +109,6 @@ def chat_stream(req: ChatRequest):
     {compact_knowledge}
     """
 
-    # Chuyển đổi định dạng tin nhắn chuẩn REST API
     gemini_contents = []
     for m in req.messages:
         role_type = "user" if m["role"] == "user" else "model"
@@ -118,11 +117,10 @@ def chat_stream(req: ChatRequest):
             "parts": [{"text": m["text"]}]
         })
 
-    # REST Endpoint trực tiếp xử lý tốt mã API Key AQ.
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse"
+    # Cấu hình endpoint gọi Key AQ... trực tiếp qua tham số query ?key=
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
     headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY
+        "Content-Type": "application/json"
     }
     payload = {
         "systemInstruction": {
