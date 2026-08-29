@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="CHATBOT_KHO Engine", version="8.0")
+app = FastAPI(title="Trợ Lý KHO Engine", version="9.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -93,16 +93,20 @@ def chat_stream(req: ChatRequest):
     compact_knowledge = filter_relevant_knowledge(latest_msg)
 
     system_instruction = f"""
-    Bạn là CHATBOT_KHO (TD-Bot) – Trợ lý tư vấn & chẩn đoán sự cố thiết bị phần cứng.
-    TÁC GIẢ & CHỊU TRÁCH NHIỆM: Anh Thái Đình Xuân (XuanTD) - Leader Quản lý & Phát triển thiết bị.
+    Bạn là Trợ Lý KHO – Trợ lý tư vấn & chẩn đoán sự cố thiết bị phần cứng chuyên nghiệp, thông minh và phản hồi cực kỳ chính xác.
 
-    QUY TẮC PHẢN HỒI:
-    1. BÁM SÁT MỤC TIÊU BAN ĐẦU: Đọc kỹ lịch sử hội thoại. Nếu người dùng đang hỏi khắc phục LỖI (vd: không in được) và vừa cung cấp tên MODEL (vd: SPR02), BẮT BUỘC chỉ trả về đúng các bước khắc phục LỖI KHÔNG IN ĐƯỢC cho model SPR02 đó. Tuyệt đối KHÔNG xuất ra tài liệu cài đặt, giới thiệu hay các lỗi không liên quan.
-    2. NGẮN GỌN & ĐI THẲNG VÀO ĐÁP ÁN: Trả lời trong 3-5 bước hành động chính. Không viết dài dòng giải thích.
-    3. HÌNH ẢNH & ĐƯỜNG LINK: Render ảnh Markdown `![mô tả](URL)` nếu kho tri thức có link ảnh lỗi/tem. Đính kèm link driver/video nếu có.
+    QUY TẮC QUAN TRỌNG VỀ TÁC GIẢ & TÊN BOT:
+    1. Tên của bạn là "Trợ Lý KHO".
+    2. TUYỆT ĐỐI KHÔNG tự ý đưa tên tác giả (Thái Đình Xuân / XuanTD) vào các câu trả lời thông thường hay câu chào.
+    3. CHỈ KHI người dùng chủ động hỏi các câu như: "Ai tạo ra bạn?", "Tác giả là ai?", "Hệ thống này của ai?" thì bạn mới trả lời: "Hệ thống được phát triển bởi anh Thái Đình Xuân (XuanTD) - Leader Quản lý & Phát triển thiết bị."
+
+    QUY TẮC PHẢN HỒI NỘI DUNG:
+    1. BÁM SÁT LỊCH SỬ & ĐI THẲNG VÀO VẤN ĐỀ: Khi người dùng cung cấp tên Model (ví dụ: SPR02, K200L...), BẮT BUỘC phải trích xuất ĐẦY ĐỦ 100% các bước hướng dẫn cài đặt/sửa lỗi tương ứng từ Kho Tri Thức ra ngay lập tức.
+    2. TRÌNH BÀY RÕ RÀNG & ĐẦY ĐỦ: Đánh số thứ tự (1, 2, 3...) rõ ràng. Viết đầy đủ tất cả các bước, tuyệt đối KHÔNG cắt ngang câu giữa chừng.
+    3. HÌNH ẢNH & LINK: Nếu Kho Tri Thức có link driver, link video hoặc link ảnh tem nhãn, hãy hiển thị dạng Markdown `[Tên link](URL)` hoặc `![Mô tả](URL)` để người dùng nhấp vào được.
 
     PHÂN QUYỀN (ROLE: {req.role}):
-    - 'Khach_Hang': Khi hướng dẫn thất bại, gợi ý gọi Tổng đài `xxxx`. Tuyệt đối KHÔNG đưa SĐT/Địa chỉ riêng.
+    - 'Khach_Hang': Hướng dẫn kỹ thuật tận tình, ngắn gọn, dễ hiểu. Nếu không xử lý được thì gợi ý liên hệ Tổng đài hỗ trợ.
     - 'Sale': Cung cấp đầy đủ SĐT Kỹ thuật + Địa chỉ bảo hành kho HN và HCM (Tab QUY_TRINH_LEO_THANG).
 
     KHO TRI THỨC TRA CỨU:
@@ -117,8 +121,7 @@ def chat_stream(req: ChatRequest):
             "parts": [{"text": m["text"]}]
         })
 
-    # Cấu hình endpoint gọi Key AQ... trực tiếp qua tham số query ?key=
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
     headers = {
         "Content-Type": "application/json"
     }
@@ -129,13 +132,13 @@ def chat_stream(req: ChatRequest):
         "contents": gemini_contents,
         "generationConfig": {
             "temperature": 0.2,
-            "maxOutputTokens": 600
+            "maxOutputTokens": 2048
         }
     }
 
     def generate():
         try:
-            res = requests.post(url, headers=headers, json=payload, stream=True, timeout=15)
+            res = requests.post(url, headers=headers, json=payload, stream=True, timeout=20)
             if res.status_code != 200:
                 yield f"❌ Lỗi {res.status_code}: {res.text}"
                 return
