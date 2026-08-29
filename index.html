@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XuanTech AI - Trợ Lý Sự Cố Thiết Bị</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Marked.js để render Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body class="bg-slate-100 h-screen flex flex-col font-sans">
+
+    <!-- HEADER / BAR TRÊN -->
+    <header class="bg-indigo-900 text-white px-4 py-3 flex items-center justify-between shadow-md">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-xl border-2 border-indigo-400">
+                XT
+            </div>
+            <div>
+                <h1 class="font-bold text-lg leading-tight flex items-center gap-2">
+                    XuanTech AI <span class="text-xs bg-indigo-700 text-indigo-200 px-2 py-0.5 rounded-full border border-indigo-500">TD-Bot</span>
+                </h1>
+                <p class="text-xs text-indigo-300">Tác giả: Thái Đình Xuân (XuanTD)</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-2">
+            <div class="hidden md:flex flex-col text-right mr-2">
+                <span id="sync-status" class="text-[11px] text-emerald-400 font-medium flex items-center gap-1 justify-end">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Tự động đồng bộ 5 phút/lần
+                </span>
+                <span id="last-sync-time" class="text-[10px] text-indigo-300">Vừa cập nhật: Chưa đồng bộ</span>
+            </div>
+
+            <button onclick="manualReloadSheetData()" id="btn-reload" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-md active:scale-95 border border-emerald-400">
+                <i class="fa-solid fa-rotate" id="icon-reload"></i> 
+                <span>Cập nhật dữ liệu</span>
+            </button>
+
+            <div class="bg-indigo-950 p-1 rounded-lg flex items-center text-xs ml-1">
+                <button id="btn-role-customer" onclick="setRole('Khach_Hang')" class="px-3 py-1.5 rounded-md font-medium transition-all bg-indigo-600 text-white">
+                    <i class="fa-solid fa-user mr-1"></i> Khách hàng
+                </button>
+                <button id="btn-role-sale" onclick="openSaleAuthModal()" class="px-3 py-1.5 rounded-md font-medium transition-all text-indigo-300 hover:text-white">
+                    <i class="fa-solid fa-user-shield mr-1"></i> Sale Nội Bộ
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- CHIP GỢI Ý TÌM KIẾM NHANH -->
+    <div class="bg-white border-b border-slate-200 px-4 py-2 flex items-center gap-2 overflow-x-auto text-xs whitespace-nowrap scrollbar-none">
+        <span class="text-slate-400 font-medium flex items-center gap-1"><i class="fa-solid fa-bolt text-amber-500"></i> Tra nhanh:</span>
+        <button onclick="quickAsk('Máy in K200L không in được')" class="bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3 py-1 rounded-full border border-slate-200 transition-all">🖨️ Máy K200L không in</button>
+        <button onclick="quickAsk('Cách xem tem nhãn tra mã máy')" class="bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3 py-1 rounded-full border border-slate-200 transition-all">🏷️ Cách xem mã máy</button>
+        <button onclick="quickAsk('Máy in bị kẹt dao cắt')" class="bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3 py-1 rounded-full border border-slate-200 transition-all">✂️ Kẹt dao cắt</button>
+        <button onclick="quickAsk('Cài Driver máy in K200L')" class="bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3 py-1 rounded-full border border-slate-200 transition-all">📥 Cài Driver K200L</button>
+        <button onclick="quickAsk('Ai là người tạo ra bạn?')" class="bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3 py-1 rounded-full border border-slate-200 transition-all">👤 Tác giả hệ thống</button>
+    </div>
+
+    <!-- KHUNG TƯƠNG TÁC CHAT -->
+    <main id="chat-box" class="flex-1 overflow-y-auto p-4 space-y-4 max-w-4xl mx-auto w-full">
+        <div class="flex items-start gap-3">
+            <div class="w-8 h-8 rounded-full bg-indigo-900 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
+                XT
+            </div>
+            <div class="bg-white p-4 rounded-2xl rounded-tl-none border border-slate-200 shadow-sm max-w-2xl text-slate-800 text-sm leading-relaxed space-y-2">
+                <p class="font-bold text-indigo-900 flex items-center gap-1.5">
+                    Xin chào! Em là XuanTech AI (TD-Bot) 👋
+                </p>
+                <p>Em hỗ trợ chẩn đoán sự cố, hướng dẫn cài đặt máy in, máy quét, máy POS và khay tiền.</p>
+                <p class="text-xs text-slate-500 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                    💡 <strong>Hệ thống tự động cập nhật ngầm 5 phút/lần.</strong> Anh/chị điền thông tin mới trên Google Sheets là hệ thống tự động nạp ngay!
+                </p>
+            </div>
+        </div>
+    </main>
+
+    <!-- THANH NHẬP CÂU HỎI -->
+    <footer class="bg-white border-t border-slate-200 p-3 max-w-4xl mx-auto w-full">
+        <form id="chat-form" onsubmit="sendMessage(event)" class="flex items-center gap-2">
+            <input 
+                type="text" 
+                id="user-input" 
+                placeholder="Nhập triệu chứng lỗi, tên máy hoặc câu hỏi..." 
+                class="flex-1 bg-slate-100 border border-slate-300 focus:border-indigo-500 focus:bg-white focus:outline-none px-4 py-2.5 rounded-xl text-sm transition-all"
+                required
+                autocomplete="off"
+            />
+            <button 
+                type="submit" 
+                id="btn-send"
+                class="bg-indigo-700 hover:bg-indigo-800 text-white font-semibold px-5 py-2.5 rounded-xl text-sm flex items-center gap-2 transition-all shadow-md active:scale-95"
+            >
+                <span>Gửi</span> <i class="fa-solid fa-paper-plane text-xs"></i>
+            </button>
+        </form>
+    </footer>
+
+    <!-- MODAL NHẬP MÃ PIN CHO SALE NỘI BỘ -->
+    <div id="sale-auth-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl space-y-4">
+            <div class="text-center space-y-1">
+                <div class="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto text-xl">
+                    <i class="fa-solid fa-lock"></i>
+                </div>
+                <h3 class="font-bold text-slate-800 text-base">Xác minh Sale Nội Bộ</h3>
+                <p class="text-xs text-slate-500">Nhập mã PIN để mở khóa quyền xem thông tin bảo hành & nút copy phiếu</p>
+            </div>
+            <input 
+                type="password" 
+                id="sale-pin-input" 
+                placeholder="Mã PIN (Mặc định: 1234)" 
+                class="w-full text-center tracking-widest text-lg bg-slate-100 border border-slate-300 focus:border-indigo-500 focus:outline-none p-2.5 rounded-xl"
+                maxlength="6"
+            />
+            <div class="flex gap-2">
+                <button onclick="closeSaleModal()" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 py-2 rounded-xl text-xs font-semibold">Hủy</button>
+                <button onclick="verifySalePin()" class="flex-1 bg-indigo-700 hover:bg-indigo-800 text-white py-2 rounded-xl text-xs font-semibold">Xác nhận</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPT TƯƠNG TÁC -->
+    <script>
+        const BACKEND_URL = "https://stride-implicit-gladiator.ngrok-free.dev";
+        let currentRole = "Khach_Hang";
+        let chatHistory = []; // Mảng lưu trữ toàn bộ lịch sử cuộc trò chuyện
+
+        // Cấu hình Marked.js ép tất cả Link mở sang Tab mới
+        const renderer = new marked.Renderer();
+        renderer.link = function(href, title, text) {
+            const linkUrl = (typeof href === 'object') ? href.href : href;
+            const linkText = (typeof href === 'object') ? href.text : text;
+            const linkTitle = (typeof href === 'object') ? href.title : title;
+            const titleAttr = linkTitle ? `title="${linkTitle}"` : '';
+            return `<a href="${linkUrl}" ${titleAttr} target="_blank" rel="noopener noreferrer" class="text-indigo-600 underline font-semibold hover:text-indigo-800 transition-colors inline-flex items-center gap-1">${linkText} <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i></a>`;
+        };
+        marked.setOptions({ renderer: renderer });
+
+        function getCurrentTimeString() {
+            const now = new Date();
+            return now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        const FIVE_MINUTES = 5 * 60 * 1000;
+        
+        async function autoReloadSheetData() {
+            try {
+                const res = await fetch(`${BACKEND_URL}/reload`, {
+                    headers: { "ngrok-skip-browser-warning": "true" }
+                });
+                if (res.ok) {
+                    const timeStr = getCurrentTimeString();
+                    document.getElementById("last-sync-time").innerText = `Vừa cập nhật: ${timeStr} (Ngầm)`;
+                }
+            } catch (err) {
+                console.log("Không thể kết nối Backend để tự động đồng bộ.");
+            }
+        }
+
+        autoReloadSheetData();
+        setInterval(autoReloadSheetData, FIVE_MINUTES);
+
+        async function manualReloadSheetData() {
+            const icon = document.getElementById("icon-reload");
+            icon.classList.add("fa-spin");
+            try {
+                const res = await fetch(`${BACKEND_URL}/reload`, {
+                    headers: { "ngrok-skip-browser-warning": "true" }
+                });
+                const data = await res.json();
+                const timeStr = getCurrentTimeString();
+                document.getElementById("last-sync-time").innerText = `Vừa cập nhật: ${timeStr} (Thủ công)`;
+                alert("✅ Đã cập nhật dữ liệu mới nhất từ Google Sheets thành công!");
+            } catch (err) {
+                alert("❌ Không thể kết nối tới Server Backend!");
+            } finally {
+                icon.classList.remove("fa-spin");
+            }
+        }
+
+        function setRole(role) {
+            currentRole = role;
+            const btnCustomer = document.getElementById("btn-role-customer");
+            const btnSale = document.getElementById("btn-role-sale");
+
+            if (role === 'Khach_Hang') {
+                btnCustomer.className = "px-3 py-1.5 rounded-md font-medium transition-all bg-indigo-600 text-white shadow-sm";
+                btnSale.className = "px-3 py-1.5 rounded-md font-medium transition-all text-indigo-300 hover:text-white";
+            } else {
+                btnSale.className = "px-3 py-1.5 rounded-md font-medium transition-all bg-amber-600 text-white shadow-sm";
+                btnCustomer.className = "px-3 py-1.5 rounded-md font-medium transition-all text-indigo-300 hover:text-white";
+            }
+        }
+
+        function openSaleAuthModal() {
+            if (currentRole === 'Sale') return;
+            document.getElementById("sale-auth-modal").classList.remove("hidden");
+            document.getElementById("sale-auth-modal").classList.add("flex");
+            document.getElementById("sale-pin-input").focus();
+        }
+
+        function closeSaleModal() {
+            document.getElementById("sale-auth-modal").classList.add("hidden");
+            document.getElementById("sale-auth-modal").classList.remove("flex");
+            document.getElementById("sale-pin-input").value = "";
+        }
+
+        function verifySalePin() {
+            const pin = document.getElementById("sale-pin-input").value;
+            if (pin === "1234") {
+                setRole('Sale');
+                closeSaleModal();
+            } else {
+                alert("Mã PIN không chính xác! Vui lòng thử lại.");
+            }
+        }
+
+        function quickAsk(text) {
+            document.getElementById("user-input").value = text;
+            sendMessage(new Event('submit'));
+        }
+
+        async function sendMessage(e) {
+            e.preventDefault();
+            const inputEl = document.getElementById("user-input");
+            const text = inputEl.value.trim();
+            if (!text) return;
+
+            const chatBox = document.getElementById("chat-box");
+
+            // Render tin nhắn User
+            const userMsgHtml = `
+                <div class="flex items-start gap-3 justify-end">
+                    <div class="bg-indigo-700 text-white p-3.5 rounded-2xl rounded-tr-none shadow-sm max-w-xl text-sm leading-relaxed">
+                        ${escapeHtml(text)}
+                    </div>
+                    <div class="w-8 h-8 rounded-full bg-slate-300 text-slate-700 flex items-center justify-center font-bold text-xs flex-shrink-0">
+                        Bạn
+                    </div>
+                </div>
+            `;
+            chatBox.insertAdjacentHTML("beforeend", userMsgHtml);
+            inputEl.value = "";
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            // Lưu vào mảng Lịch sử chat
+            chatHistory.push({ role: "user", text: text });
+
+            // Render khung AI chờ
+            const aiMsgId = "ai-msg-" + Date.now();
+            const aiMsgHtml = `
+                <div class="flex items-start gap-3">
+                    <div class="w-8 h-8 rounded-full bg-indigo-900 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
+                        XT
+                    </div>
+                    <div class="bg-white p-4 rounded-2xl rounded-tl-none border border-slate-200 shadow-sm max-w-2xl text-slate-800 text-sm leading-relaxed space-y-2 relative group">
+                        <div id="${aiMsgId}" class="markdown-body space-y-2">
+                            <span class="inline-block animate-pulse text-slate-400">Đang tra cứu kho tri thức...</span>
+                        </div>
+                        <button onclick="copyToClipboard('${aiMsgId}')" class="opacity-0 group-hover:opacity-100 transition-opacity absolute top-2 right-2 bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 text-xs px-2.5 py-1 rounded-md border border-slate-200 flex items-center gap-1">
+                            <i class="fa-regular fa-copy"></i> Copy
+                        </button>
+                    </div>
+                </div>
+            `;
+            chatBox.insertAdjacentHTML("beforeend", aiMsgHtml);
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            try {
+                // Gửi mảng chatHistory qua phương thức POST
+                const response = await fetch(`${BACKEND_URL}/chat`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "ngrok-skip-browser-warning": "true"
+                    },
+                    body: JSON.stringify({
+                        messages: chatHistory,
+                        role: currentRole
+                    })
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder("utf-8");
+                const aiEl = document.getElementById(aiMsgId);
+                aiEl.innerHTML = "";
+
+                let fullText = "";
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    fullText += decoder.decode(value, { stream: true });
+                    aiEl.innerHTML = marked.parse(fullText);
+                    chatBox.scrollTop = chatBox.scrollHeight;
+                }
+
+                // Lưu phản hồi của AI vào mảng Lịch sử chat
+                chatHistory.push({ role: "model", text: fullText });
+
+            } catch (err) {
+                document.getElementById(aiMsgId).innerHTML = `<span class="text-red-500 font-semibold">❌ Lỗi kết nối Server Backend!</span>`;
+            }
+        }
+
+        function copyToClipboard(elementId) {
+            const text = document.getElementById(elementId).innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                alert("📋 Đã copy câu trả lời!");
+            });
+        }
+
+        function escapeHtml(text) {
+            return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+    </script>
+</body>
+</html>
