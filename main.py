@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Engine", version="16.0")
+app = FastAPI(title="Trợ Lý KHO Engine", version="19.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,13 +20,19 @@ app.add_middleware(
 
 SHEET_ID = "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
 RAM_CACHE = {}
-TABS = [
-    "DANH_MUC_LOI", "THAO_TAC_CAI_DAT", "LUONG_CHAN_DOAN", 
-    "NHAN_DIEN_THIET_BI", "QUY_TRINH_CHUNG", "DANH_MUC_SAN_PHAM", 
-    "QUY_TRINH_LEO_THANG", "NHAN_SU_THIET_BI"
+
+# Cấu trúc 5 Tab chốt theo yêu cầu thực tế
+TABS_PUBLIC = [
+    "1_THIET_BI_VA_LOI", 
+    "2_HUONG_DAN_CAI_DAT", 
+    "3_CHINH_SACH_SAPO", 
+    "NHAN_DIEN_THIET_BI"
 ]
+TAB_PRIVATE = "4_DU_LIEU_NOI_BO"
+ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 
 async def fetch_single_tab(client: httpx.AsyncClient, tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
@@ -48,11 +54,11 @@ async def fetch_single_tab(client: httpx.AsyncClient, tab: str):
 async def load_sheet_data_async():
     global RAM_CACHE
     async with httpx.AsyncClient() as client:
-        tasks = [fetch_single_tab(client, tab) for tab in TABS]
+        tasks = [fetch_single_tab(client, tab) for tab in ALL_TABS]
         results = await asyncio.gather(*tasks)
         
     RAM_CACHE = {tab: records for tab, records in results}
-    print("✅ Đã nạp dữ liệu Google Sheet vào RAM!")
+    print("✅ Đã nạp thành công 5 Tab Google Sheet vào RAM!")
     return {"status": "success", "loaded_tabs": list(RAM_CACHE.keys())}
 
 @app.on_event("startup")
@@ -63,15 +69,36 @@ async def startup_event():
 async def reload_data():
     return await load_sheet_data_async()
 
+class SaleAuthRequest(BaseModel):
+    email: str
+    passcode: str
+
+@app.post("/verify-sale")
+def verify_sale(req: SaleAuthRequest):
+    email = req.email.strip().lower()
+    passcode = req.passcode.strip()
+    
+    if not email.endswith("@sapo.vn"):
+        return {"success": False, "message": "Email phải có đuôi @sapo.vn!"}
+        
+    if passcode == SALE_SECRET_KEY:
+        return {"success": True, "message": "Xác thực Sale thành công!"}
+    else:
+        return {"success": False, "message": "Mật khẩu nội bộ chưa chính xác!"}
+
 class ChatRequest(BaseModel):
     messages: list
     role: str = "Khach_Hang"
 
-def filter_relevant_knowledge(latest_user_msg: str) -> str:
+def filter_relevant_knowledge(latest_user_msg: str, role: str) -> str:
     query_words = [w.lower() for w in latest_user_msg.split() if len(w) > 1]
     filtered_data = {}
 
-    for tab_name, rows in RAM_CACHE.items():
+    # Khách hàng chỉ truy cập TABS_PUBLIC. Sale được mở rộng thêm TAB_PRIVATE.
+    accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
+
+    for tab_name in accessible_tabs:
+        rows = RAM_CACHE.get(tab_name, [])
         matched_rows = []
         for row in rows:
             row_text = " ".join(row.values()).lower()
@@ -80,42 +107,50 @@ def filter_relevant_knowledge(latest_user_msg: str) -> str:
         if matched_rows:
             filtered_data[tab_name] = matched_rows[:3]
 
+    # Nếu không khớp từ khóa cụ thể, trả về dữ liệu mặc định an toàn
     if not filtered_data:
         filtered_data = {
-            "LUONG_CHAN_DOAN": RAM_CACHE.get("LUONG_CHAN_DOAN", [])[:2],
-            "QUY_TRINH_CHUNG": RAM_CACHE.get("QUY_TRINH_CHUNG", [])[:2]
+            "3_CHINH_SACH_SAPO": RAM_CACHE.get("3_CHINH_SACH_SAPO", [])[:2],
+            "2_HUONG_DAN_CAI_DAT": RAM_CACHE.get("2_HUONG_DAN_CAI_DAT", [])[:2],
+            "NHAN_DIEN_THIET_BI": RAM_CACHE.get("NHAN_DIEN_THIET_BI", [])[:2]
         }
+        if role == "Sale":
+            filtered_data["4_DU_LIEU_NOI_BO"] = RAM_CACHE.get("4_DU_LIEU_NOI_BO", [])[:2]
 
     return json.dumps(filtered_data, ensure_ascii=False, separators=(',', ':'))
 
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
-    compact_knowledge = filter_relevant_knowledge(latest_msg)
+    compact_knowledge = filter_relevant_knowledge(latest_msg, req.role)
 
     system_instruction = f"""
     Bạn là Trợ Lý KHO – Trợ lý tư vấn & chẩn đoán sự cố thiết bị phần cứng chuyên nghiệp của Sapo.
 
-    WEBSITE CHÍNH THỨC: https://sapo.vn | THIẾT BỊ: https://shop.sapo.vn
+    WEBSITE THAM CHIẾU CHÍNH THỨC:
+    - Trang chủ chính: https://sapo.vn
+    - Trang thiết bị phần cứng: https://shop.sapo.vn
 
-    QUY TẮC PHẢN HỒI NỘI DUNG (CHÍNH XÁC & HOÀN CHỈNH 100%):
-    1. HOÀN THÀNH ĐẦY ĐỦ CÂU VÀ LINK MARKDOWN:
-       - Khi xuất link hoặc video, BẮT BUỘC phải viết trọn vẹn cú pháp Markdown dạng `[Tên hiển thị](URL)`. TUYỆT ĐỐI KHÔNG ngắt câu hay bỏ dở link giữa chừng.
-       - Trích xuất ĐẦY ĐỦ toàn bộ nội dung hướng dẫn thao tác kỹ thuật từ Kho Tri Thức (nhấn nút nào, giữ bao nhiêu giây, cổng kết nối, khổ giấy).
-    2. NGUYÊN TẮC CHỐNG BỊA ĐỊA CHỈ:
-       - CHỈ CUNG CẤP địa chỉ bảo hành/SĐT khi thông tin đó CÓ TRONG KHO TRI THỨC.
-       - Nếu thông tin chưa có, báo rõ chưa cập nhật và hướng dẫn truy cập https://shop.sapo.vn hoặc liên hệ Tổng đài Sapo.
-    3. ĐỊNH DẠNG TRÌNH BÀY:
+    QUY TẮC PHẢN HỒI NỘI DUNG (CHÍNH XÁC & BẢO MẬT KHẮC KHET):
+    1. TRÍCH XUẤT 100% NỘI DUNG CHI TIẾT TỪNG BƯỚC:
+       - Khi trả lời về hướng dẫn cài đặt, chẩn đoán lỗi hay chính sách bảo hành: BẮT BUỘC trích xuất ĐẦY ĐỦ chi tiết từng bước thao tác trong Kho Tri Thức (nhấn nút nào, giữ bao nhiêu giây, cổng USB/LAN, khổ giấy 80mm...).
+       - Viết trọn vẹn cú pháp Markdown link `[Tên hiển thị](URL)`. TUYỆT ĐỐI KHÔNG ngắt dở dở link hay tóm tắt làm mất thông tin kỹ thuật.
+    2. CHỐNG BỊA ĐỊA CHỈ / THÔNG TIN BẢO HÀNH:
+       - CHỈ CUNG CẤP địa chỉ bảo hành, SĐT khi thông tin đó CÓ TRONG KHO TRI THỨC được cấp.
+       - Nếu thông tin chưa có trong Kho Tri Thức, báo rõ chưa cập nhật và hướng dẫn truy cập https://shop.sapo.vn hoặc liên hệ Tổng đài Sapo.
+    3. NGUYÊN TẮC BẢO MẬT DỮ LIỆU NỘI BỘ (QUAN TRỌNG):
+       - Hiện tại phân quyền đang là ROLE: {req.role}.
+       - NẾU ROLE LA 'Khach_Hang': TUYỆT ĐỐI KHÔNG tiết lộ bất kỳ thông tin nhạy cảm nội bộ nào (SĐT kỹ thuật trực ca, chiết khấu nội bộ, địa chỉ kho riêng). Chỉ hướng dẫn kỹ thuật công khai và chính sách chung.
+       - NẾU ROLE LÀ 'Sale': Mới cung cấp đầy đủ quy trình bảo hành nội bộ, SĐT Kỹ thuật và ghi chú bảo mật.
+    4. QUY TẮC TRÌNH BÀY & TÁC GIẢ:
        - TUYỆT ĐỐI KHÔNG DÙNG LATEX (`$\\rightarrow$`, `\\rightarrow`, `\\$`). Dùng ký tự Unicode `➔` hoặc `->` khi hướng dẫn bấm menu.
-       - Tên của bạn là "Trợ Lý KHO". Chỉ khi người dùng hỏi "Ai tạo ra bạn?" mới nêu tên tác giả Thái Đình Xuân (XuanTD).
-
-    PHÂN QUYỀN: 'Khach_Hang' (Hướng dẫn kỹ thuật chi tiết), 'Sale' (Thông tin quy trình bảo hành).
+       - Tên của bạn là "Trợ Lý KHO". Không tự chèn tên tác giả vào câu chào.
+       - Chỉ khi người dùng hỏi "Ai tạo ra bạn?" mới nêu tên tác giả Thái Đình Xuân (XuanTD) - Nhân viên Quản lý & Phát triển thiết bị.
 
     KHO TRI THỨC TRA CỨU:
     {compact_knowledge}
     """
 
-    # Chỉ giữ 6 tin nhắn gần nhất để tối ưu tốc độ xử lý
     trimmed_messages = req.messages[-6:] if len(req.messages) > 6 else req.messages
     gemini_contents = []
     for m in trimmed_messages:
@@ -125,6 +160,7 @@ async def chat_stream(req: ChatRequest):
             "parts": [{"text": m["text"]}]
         })
 
+    # Sử dụng chuẩn model mới nhất gemini-3.6-flash
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
     headers = {"Content-Type": "application/json"}
     payload = {
