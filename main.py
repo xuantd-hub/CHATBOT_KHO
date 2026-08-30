@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Master Pro", version="122.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Precision Engine", version="124.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -80,7 +80,7 @@ def health_check():
     total_items = sum(len(v) for v in RAM_CACHE.values())
     return {
         "status": "healthy",
-        "service": "Trợ Lý KHO Sapo Master Pro",
+        "service": "Trợ Lý KHO Sapo Precision Engine",
         "total_records": total_items
     }
 
@@ -106,78 +106,104 @@ class ChatRequest(BaseModel):
     messages: list
     role: str = "Khach_Hang"
 
-def get_smart_knowledge_context(query: str, role: str) -> str:
-    """ Tìm kiếm chính xác, ưu tiên các dòng chứa nhiều từ khóa khớp nhất """
+def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
+    """ Thuật toán gọng kìm: lọc cực kỳ chính xác dòng dữ liệu liên quan nhất """
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
-    words = [w.lower() for w in query.split() if len(w) > 1]
+    query_lower = query.lower()
+    words = [w for w in query_lower.split() if len(w) > 1]
     
     scored_rows = []
     for tab in accessible_tabs:
         for row in RAM_CACHE.get(tab, []):
             row_text = " ".join(str(v).lower() for v in row.values())
-            score = sum(2 if w in row_text else 0 for w in words)
-            # Thưởng điểm nếu tên thiết bị khớp trực tiếp
+            score = 0
+            
+            # Ưu tiên cao nhất nếu tên thiết bị xuất hiện trong câu hỏi
             dev_name = str(row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", ""))).lower()
-            if any(w in dev_name for w in words):
-                score += 5
+            if dev_name and any(w in dev_name for w in words):
+                score += 15
+            
+            # Cộng điểm từ khóa khớp trong nội dung
+            for w in words:
+                if w in row_text:
+                    score += 3
             
             if score > 0:
                 scored_rows.append((score, tab, row))
 
     scored_rows.sort(key=lambda x: x[0], reverse=True)
-    top_matches = scored_rows[:4]  # Lấy top 4 dòng chuẩn xác nhất để AI đọc kỹ
+    
+    # Chỉ lấy tối đa 2 dòng chuẩn xác nhất để giữ context sạch, sắc bén, không bị loãng
+    top_matches = scored_rows[:2]
 
     if not top_matches:
-        top_matches = [(1, "2_HUONG_DAN_CAI_DAT", r) for r in RAM_CACHE.get("2_HUONG_DAN_CAI_DAT", [])[:2]]
+        top_matches = [(1, "2_HUONG_DAN_CAI_DAT", r) for r in RAM_CACHE.get("2_HUONG_DAN_CAI_DAT", [])[:1]]
 
     knowledge_text = ""
     for score, tab, row in top_matches:
-        knowledge_text += f"\n--- NGUỒN DỮ LIỆU TỪ TAB [{tab}] ---\n"
+        knowledge_text += f"\n=== THÔNG TIN CHÍNH XÁC TỪ TAB [{tab}] ===\n"
         for key, value in row.items():
-            knowledge_text += f"{key}: {value}\n"
-    return knowledge_text
+            if value:
+                knowledge_text += f"- {key}: {value}\n"
+    return knowledge_text, top_matches
 
-def build_system_prompt(knowledge_context: str, role: str) -> str:
+def format_precision_fallback(matches: list) -> str:
+    """ Dự phòng nội bộ cực kỳ rành mạch, chi tiết từng bước """
+    response = "🤖 **Trợ Lý KHO Sapo** (Tra cứu kỹ thuật):\n\n"
+    for _, tab, row in matches[:2]:
+        dev_name = row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", "Thiết bị Sapo"))
+        guide = row.get("Noi_Dung_Huong_Dan", row.get("Cach_Khac_Phuc", row.get("Mo_Ta_Loi", row.get("Mo_Ta", ""))))
+        driver = row.get("Link_Driver", row.get("Link_Video", ""))
+
+        response += f"📌 **Thiết bị / Vấn đề:** {dev_name}\n"
+        if guide:
+            response += f"• **Hướng dẫn xử lý:** {guide}\n"
+        if driver:
+            response += f"• 🔗 **Link Driver / Video:** [{dev_name}]({driver})\n"
+        response += "\n"
+    return response.strip()
+
+def build_expert_system_prompt(knowledge_context: str, role: str) -> str:
     return f"""
-    Bạn là Trợ Lý KHO Sapo – Chuyên gia kỹ thuật phần cứng chuyên sâu, nhạy bén và cực kỳ chính xác của công ty Sapo.
-
-    QUY TẮC BẮT BUỘC KHI TRẢ LỜI:
-    1. **Bám sát tuyệt đối dữ liệu được cung cấp:** Không được bịa đặt thông tin ngoài dữ liệu. Nếu dữ liệu có hướng dẫn cụ thể, hãy bóc tách và trình bày lại thật rành mạch, chi tiết từng bước.
-    2. **Trả lời thẳng vào trọng tâm:** Không nói lan man, không chào hỏi dài dòng sướt mướt. Đi thẳng vào giải pháp, thông số hoặc hướng dẫn xử lý lỗi mà khách hàng đang hỏi.
-    3. **Định dạng Markdown chuyên nghiệp:** Dùng tiêu đề phụ (`###`), gạch đầu dòng (`-`), in đậm các thông số quan trọng (tên thiết bị, mã lỗi, phím bấm).
-    4. **Trích xuất đủ Link:** Nếu trong dữ liệu có chứa link (Drive, Video, Hướng dẫn), bắt buộc phải gắn link dưới dạng Markdown chuẩn: `[Tên hiển thị](URL)`.
-    5. Xưng "Trợ Lý KHO". Dùng mũi tên `➔` để chỉ hướng thao tác.
+    Bạn là Trợ Lý KHO Sapo – Chuyên gia trưởng kỹ thuật phần cứng và thiết bị kho Sapo.
+    
+    NHIỆM VỤ CỐT LÕI:
+    1. Đọc kỹ phần "THÔNG TIN CHÍNH XÁC" bên dưới và trích xuất ra câu trả lời ĐÚNG TRỌNG TÂM nhất cho câu hỏi của người dùng. 
+    2. **Tuyệt đối không lan man, không trộn lẫn thông tin của các thiết bị khác.** Nếu dữ liệu nói về thiết bị A, tuyệt đối chỉ trả lời về thiết bị A.
+    3. Trình bày rành mạch, chuyên nghiệp theo các bước rõ ràng bằng Markdown (dùng gạch đầu dòng `-`, in đậm các từ khóa chính).
+    4. Trích xuất ĐẦY ĐỦ link (Driver, Video, Hướng dẫn) có trong dữ liệu bằng định dạng Markdown chính xác: `[Tên hiển thị](URL)`. Không được làm sai lệch URL.
+    5. Xưng danh "Trợ Lý KHO". Dùng mũi tên `➔` để chỉ hướng thao tác.
 
     PHÂN QUYỀN BẢO MẬT (ROLE: {role}):
-    - 'Khach_Hang': Tuyệt đối KHÔNG tiết lộ thông tin bảo hành nội bộ hoặc quy trình đổi trả nội bộ từ Tab 4.
-    - 'Sale': Được phép giải đáp đầy đủ thông tin bảo hành, xử lý nội bộ từ Tab 4.
+    - 'Khach_Hang': Tuyệt đối KHÔNG tiết lộ thông tin bảo hành nội bộ từ Tab 4.
+    - 'Sale': Được phép giải đáp chi tiết thông tin bảo hành từ Tab 4.
 
-    KHO TRI THỨC KĨ THUẬT CHUẨN XÁC:
+    DỮ LIỆU KHO TRI THỨC KỸ THUẬT:
     {knowledge_context}
     """
 
 # ==========================================
-# 1. CỔNG WEB VERCEL (/chat) - GROQ STREAM 0.3S
+# 1. CỔNG WEB VERCEL (/chat) - PRECISION STREAM
 # ==========================================
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
     
-    # Xử lý nhanh câu chào
     clean_q = re.sub(r'[^\w\s]', '', latest_msg.lower()).strip()
     quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chào bạn nhé"]
     if clean_q in quick_greetings:
         async def greeting_gen():
-            yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị, cài đặt máy in hay xử lý lỗi cụ thể nào ạ?"
+            yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần tra cứu thông tin thiết bị, hướng dẫn cài đặt hay xử lý lỗi cụ thể nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
-    focused_knowledge = get_smart_knowledge_context(latest_msg, req.role)
-    system_instruction = build_system_prompt(focused_knowledge, req.role)
+    focused_knowledge, raw_matches = get_high_precision_knowledge(latest_msg, req.role)
+    system_instruction = build_expert_system_prompt(focused_knowledge, req.role)
 
     async def generate_groq():
         yield ""  # Mở luồng ngay lập tức
         
-        groq_models = ["llama-3.1-8b-instant", "llama3-8b-8192", "llama-3.3-70b-versatile"]
+        # Ưu tiên dùng model thông minh 70B nếu được, hoặc 8B siêu nhanh
+        groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-8b-8192"]
         for g_model in groq_models:
             try:
                 url = "https://api.groq.com/openai/v1/chat/completions"
@@ -188,7 +214,7 @@ async def chat_stream(req: ChatRequest):
                         {"role": "system", "content": system_instruction},
                         {"role": "user", "content": latest_msg}
                     ],
-                    "temperature": 0.1,  # Đặt nhiệt độ cực thấp để AI tập trung tối đa vào độ chính xác, không sáng tác bừa
+                    "temperature": 0.05,  # Ép gần như tuyệt đối để AI không sáng tác bừa, chỉ bám sát dữ liệu chính xác
                     "max_tokens": 1000,
                     "stream": True
                 }
@@ -208,7 +234,8 @@ async def chat_stream(req: ChatRequest):
                         return
             except Exception: continue
 
-        yield "❌ Trợ Lý KHO đang bận kết nối, anh/chị vui lòng gửi lại câu hỏi ngắn gọn hơn nhé."
+        # DỰ PHÒNG AN TOÀN: Nếu Groq bận, trả về dữ liệu chuẩn xác từ Sheet
+        yield format_precision_fallback(raw_matches)
 
     return StreamingResponse(generate_groq(), media_type="text/plain", headers={"Cache-Control": "no-cache"})
 
@@ -218,33 +245,6 @@ async def chat_stream(req: ChatRequest):
 def format_for_gchat(text: str) -> str:
     text = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text)
     return text.replace(r'\rightarrow', '➔').replace(r'$\rightarrow$', '➔').replace('$', '').strip()
-
-async def call_groq_fast_gchat(user_query: str, role: str = "Sale") -> str:
-    focused_knowledge = get_smart_knowledge_context(user_query, role)
-    system_instruction = build_system_prompt(focused_knowledge, role)
-
-    groq_models = ["llama-3.1-8b-instant", "llama3-8b-8192", "llama-3.3-70b-versatile"]
-    for g_model in groq_models:
-        try:
-            url = "https://api.groq.com/openai/v1/chat/completions"
-            headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-            payload = {
-                "model": g_model,
-                "messages": [
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": user_query}
-                ],
-                "temperature": 0.1,
-                "max_tokens": 800
-            }
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=3.2)
-            if res.status_code == 200:
-                data = res.json()
-                raw_text = data["choices"][0]["message"]["content"]
-                return format_for_gchat(raw_text)
-        except Exception: continue
-
-    return "❌ Hệ thống đang bận, anh/chị thử lại câu hỏi nhé."
 
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -266,8 +266,31 @@ async def google_chat_webhook(request: Request):
                     "text": "👋 Xin chào! Em là *Trợ Lý KHO Sapo*. Anh/chị cần tra cứu thông tin thiết bị hay hướng dẫn cài đặt nào ạ?"
                 })
 
-            ai_reply = await call_groq_fast_gchat(cleaned_message, role="Sale")
-            return JSONResponse(content={"text": ai_reply})
+            focused_knowledge, raw_matches = get_high_precision_knowledge(cleaned_message, role="Sale")
+            
+            groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-8b-8192"]
+            for g_model in groq_models:
+                try:
+                    url = "https://api.groq.com/openai/v1/chat/completions"
+                    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+                    payload = {
+                        "model": g_model,
+                        "messages": [
+                            {"role": "system", "content": f"Bạn là Trợ Lý KHO Sapo trên Google Chat. Trả lời cực kỳ chính xác, ngắn gọn, kèm link Markdown.\n{focused_knowledge}"},
+                            {"role": "user", "content": cleaned_message}
+                        ],
+                        "temperature": 0.05,
+                        "max_tokens": 600
+                    }
+                    res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=2.8)
+                    if res.status_code == 200:
+                        data = res.json()
+                        raw_text = data["choices"][0]["message"]["content"]
+                        return JSONResponse(content={"text": format_for_gchat(raw_text)})
+                except Exception: continue
+
+            fallback_reply = format_precision_fallback(raw_matches)
+            return JSONResponse(content={"text": format_for_gchat(fallback_reply)})
 
     except Exception as e:
         return JSONResponse(content={"text": f"❌ Lỗi xử lý Bot: {str(e)}"})
