@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Master Cloud Engine", version="106.0")
+app = FastAPI(title="Trợ Lý KHO Final Production Engine", version="109.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,7 +40,7 @@ HTTP_CLIENT: httpx.AsyncClient = None
 async def startup_event():
     global HTTP_CLIENT
     HTTP_CLIENT = httpx.AsyncClient(
-        timeout=httpx.Timeout(20.0, read=40.0),
+        timeout=httpx.Timeout(10.0, read=15.0),
         limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
     )
     await load_sheet_data_async()
@@ -53,7 +53,7 @@ async def shutdown_event():
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
     try:
-        res = await HTTP_CLIENT.get(url, timeout=10.0)
+        res = await HTTP_CLIENT.get(url, timeout=8.0)
         if res.status_code == 200 and "text/csv" in res.headers.get("Content-Type", ""):
             df = pd.read_csv(io.BytesIO(res.content)).fillna("")
             records = []
@@ -71,12 +71,12 @@ async def load_sheet_data_async():
     tasks = [fetch_single_tab_raw(tab) for tab in ALL_TABS]
     results = await asyncio.gather(*tasks)
     RAM_CACHE = {tab: records for tab, records in results}
-    print("✅ [CLOUD RUN] Đã nạp 100% dữ liệu RAM!")
+    print("✅ [CLOUD RUN] Đã nạp 100% dữ liệu vào RAM!")
     return {"status": "success"}
 
 @app.get("/")
 def health_check():
-    return {"status": "healthy", "service": "Trợ Lý KHO Engine Full", "region": "asia-southeast1"}
+    return {"status": "healthy", "service": "Trợ Lý KHO Final Engine", "region": "asia-southeast1"}
 
 @app.get("/reload")
 async def reload_data():
@@ -100,35 +100,58 @@ class ChatRequest(BaseModel):
     messages: list
     role: str = "Khach_Hang"
 
-def get_full_accessible_knowledge(role: str) -> str:
+def get_ultra_fast_focused_knowledge(query: str, role: str) -> str:
+    """ Trích xuất đúng 3-5 dòng liên quan nhất trong RAM trong 0.001s """
+    stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "máy", "thế", "nào", "bao", "nhiêu", "thông", "số"}
+    words = [w.lower() for w in query.split() if len(w) > 1 and w.lower() not in stop_words]
+    if not words:
+        words = [query.lower()]
+
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
-    full_data = {}
+    scored_rows = []
+
     for tab in accessible_tabs:
-        full_data[tab] = RAM_CACHE.get(tab, [])
-    return json.dumps(full_data, ensure_ascii=False, separators=(',', ':'))
+        for row in RAM_CACHE.get(tab, []):
+            row_text = " ".join(str(v).lower() for v in row.values())
+            score = sum(1 for w in words if w in row_text)
+            model_name = str(row.get("Ten_Thiet_Bi", "")).lower()
+            if any(w in model_name for w in words):
+                score += 10
+            if score > 0:
+                scored_rows.append((score, tab, row))
+
+    scored_rows.sort(key=lambda x: x[0], reverse=True)
+    top_matches = scored_rows[:4]  # Rút gọn còn đúng 4 dòng liên quan nhất
+
+    if not top_matches:
+        top_matches = [(1, "2_HUONG_DAN_CAI_DAT", r) for r in RAM_CACHE.get("2_HUONG_DAN_CAI_DAT", [])[:3]]
+
+    knowledge_text = ""
+    for score, tab, row in top_matches:
+        knowledge_text += f"\n--- [{tab}] ---\n"
+        for key, value in row.items():
+            knowledge_text += f"{key}: {value}\n"
+    return knowledge_text
 
 # ==========================================
-# 1. CỔNG DÀNH CHO WEB VERCEL (/chat)
+# 1. CỔNG WEB VERCEL (GEMINI 3.6 FLASH STREAM)
 # ==========================================
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
-    full_knowledge_context = get_full_accessible_knowledge(req.role)
+    latest_msg = req.messages[-1]["text"] if req.messages else ""
+    focused_knowledge = get_ultra_fast_focused_knowledge(latest_msg, req.role)
 
     system_instruction = f"""
-    Bạn là Trợ Lý KHO – Chuyên gia tư vấn & kỹ thuật phần cứng Sapo. Thông minh, tận tâm và chính xác.
+    Bạn là Trợ Lý KHO – Chuyên gia tư vấn & kỹ thuật phần cứng Sapo.
     NHIỆM VỤ:
-    1. Đọc kỹ Kho Tri Thức bên dưới để giải thích rành mạch từng bước cho người dùng.
-    2. Trích xuất ĐẦY ĐỦ link Driver/Video bằng Markdown `[Tên](URL)`.
-    3. ZERO HALLUCINATION: Chỉ dùng dữ liệu có sẵn. Dùng `➔` chỉ hướng. Xưng danh "Trợ Lý KHO".
+    1. Đọc Kho Tri Thức trích xuất dưới đây để trả lời câu hỏi.
+    2. Cung cấp ĐẦY ĐỦ link Driver/Video bằng Markdown `[Tên](URL)`.
+    3. ZERO HALLUCINATION: Chỉ dùng thông tin trong dữ liệu. Dùng `➔` chỉ hướng.
 
-    BẢO MẬT (ROLE: {req.role}):
-    - 'Khach_Hang': Dữ liệu bảo hành Tab 4 đã bị cắt 100%.
-    - 'Sale': Mở khóa đầy đủ thông tin bảo hành nội bộ.
-
-    KHO TRI THỨC TOÀN DIỆN:
-    {full_knowledge_context}
+    KHO TRI THỨC TRÍCH XUẤT:
+    {focused_knowledge}
     """
-    trimmed_messages = req.messages[-5:] if len(req.messages) > 5 else req.messages
+    trimmed_messages = req.messages[-3:] if len(req.messages) > 3 else req.messages
     gemini_contents = []
     for m in trimmed_messages:
         role_type = "user" if m["role"] == "user" else "model"
@@ -139,7 +162,7 @@ async def chat_stream(req: ChatRequest):
     payload = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": gemini_contents,
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 3000}
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1000}
     }
 
     async def generate():
@@ -165,35 +188,33 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(generate(), media_type="text/plain", headers={"Cache-Control": "no-cache"})
 
 # ==========================================
-# 2. CỔNG DÀNH CHO GOOGLE CHAT BOT (/google-chat)
+# 2. CỔNG GOOGLE CHAT BOT (GEMINI 3.6 FLASH)
 # ==========================================
 def format_text_for_google_chat(text: str) -> str:
     text = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text)
     return text.replace(r'\rightarrow', '➔').replace(r'$\rightarrow$', '➔').replace('$', '').strip()
 
-async def ask_gemini_fast_google_chat(user_query: str) -> str:
-    knowledge_context = get_full_accessible_knowledge(role="Sale")
+async def call_gemini_36_fast(user_query: str) -> str:
+    knowledge_context = get_ultra_fast_focused_knowledge(user_query, role="Sale")
     system_instruction = f"""
-    Bạn là Trợ Lý KHO Sapo trên Google Chat nội bộ. Tận tâm, thông minh.
-    Nhiệm vụ: Trả lời ngắn gọn, rành mạch dựa vào Kho Tri Thức.
-    KHO TRI THỨC:
+    Bạn là Trợ Lý KHO Sapo trên Google Chat. Ngắn gọn, rành mạch và chính xác.
+    Cung cấp link Driver/Video bằng Markdown.
+    
+    KHO TRI THỨC TRÍCH XUẤT:
     {knowledge_context}
     """
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
     payload = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": [{"role": "user", "parts": [{"text": user_query}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1200}
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 600}
     }
-    try:
-        res = await HTTP_CLIENT.post(url, json=payload, timeout=4.0)
-        if res.status_code == 200:
-            data = res.json()
-            raw_reply = data["candidates"][0]["content"]["parts"][0]["text"]
-            return format_text_for_google_chat(raw_reply)
-    except Exception as e:
-        return f"❌ Hệ thống bận: {str(e)}"
-    return "❌ Dữ liệu không phản hồi."
+    res = await HTTP_CLIENT.post(url, json=payload, timeout=3.8)
+    if res.status_code == 200:
+        data = res.json()
+        raw_reply = data["candidates"][0]["content"]["parts"][0]["text"]
+        return format_text_for_google_chat(raw_reply)
+    return "❌ Không thể lấy dữ liệu từ AI."
 
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -202,19 +223,23 @@ async def google_chat_webhook(request: Request):
         event_type = event.get("type")
 
         if event_type == "ADDED_TO_SPACE":
-            return JSONResponse(content={"text": "👋 Xin chào! Tôi là *Trợ Lý KHO Sapo*. Hãy gõ câu hỏi để tôi hỗ trợ ngay!"})
+            return JSONResponse(content={"text": "👋 Xin chào! Tôi là *Trợ Lý KHO Sapo*. Hãy gõ mã thiết bị hoặc triệu chứng lỗi để hỗ trợ!"})
 
         if event_type == "MESSAGE":
             user_message = event.get("message", {}).get("text", "")
             cleaned_message = user_message.replace("@Trợ Lý KHO Sapo", "").strip()
 
-            if not cleaned_message or cleaned_message.lower() in ["chào", "chào bạn", "hi", "hello"]:
-                return JSONResponse(content={"text": "👋 Xin chào! Em là *Trợ Lý KHO Sapo*. Anh/chị cần hỗ trợ gì ạ?"})
+            # Phản hồi câu chào hỏi trong 0.01s
+            quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
+            if not cleaned_message or cleaned_message.lower() in quick_greetings:
+                return JSONResponse(content={
+                    "text": "👋 Xin chào! Em là *Trợ Lý KHO Sapo*. Anh/chị cần hỗ trợ kiểm tra thông số thiết bị, cài đặt máy in hay chẩn đoán lỗi gì ạ?"
+                })
 
-            ai_reply = await ask_gemini_fast_google_chat(cleaned_message)
+            ai_reply = await call_gemini_36_fast(cleaned_message)
             return JSONResponse(content={"text": ai_reply})
 
     except Exception as e:
-        return JSONResponse(content={"text": f"❌ Lỗi hệ thống Bot: {str(e)}"})
+        return JSONResponse(content={"text": f"❌ Lỗi xử lý Bot: {str(e)}"})
 
     return JSONResponse(content={"text": "OK"})
