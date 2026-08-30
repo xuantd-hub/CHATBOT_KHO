@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Groq UltraFast Engine", version="111.0")
+app = FastAPI(title="Trợ Lý KHO Auto-Discovery Engine", version="112.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,10 +21,11 @@ app.add_middleware(
 
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6Lv4_HzCEz6iLuRChDrw-NGLOO28NYuM37uBe8caeYIZg").strip()
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
-# Đổi tên model sang bản ổn định và siêu tốc 100% của Groq
-MODEL_NAME = "llama-3.1-8b-instant"
+# Biến lưu tên Model Groq hoạt động thực tế
+ACTIVE_GROQ_MODEL = None
 
 RAM_CACHE = {}
 
@@ -47,11 +48,52 @@ async def startup_event():
         limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
     )
     await load_sheet_data_async()
+    await discover_active_groq_model()
 
 @app.on_event("shutdown")
 async def shutdown_event():
     if HTTP_CLIENT:
         await HTTP_CLIENT.aclose()
+
+async def discover_active_groq_model():
+    """ Tự động lấy danh sách Model khả dụng từ Groq API của tài khoản """
+    global ACTIVE_GROQ_MODEL
+    if not GROQ_API_KEY:
+        print("⚠️ Chưa cấu hình GROQ_API_KEY, sẽ dùng Gemini dự phòng.")
+        return
+
+    url = "https://api.groq.com/openai/v1/models"
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+    try:
+        res = await HTTP_CLIENT.get(url, headers=headers, timeout=5.0)
+        if res.status_code == 200:
+            models_data = res.json().get("data", [])
+            model_ids = [m["id"] for m in models_data]
+            print(f"📋 Các Model Groq hỗ trợ cho tài khoản của bạn: {model_ids}")
+            
+            # Ưu tiên các model siêu tốc theo thứ tự
+            preferred_order = [
+                "llama-3.3-70b-versatile",
+                "llama-3.1-8b-instant",
+                "llama3-8b-8192",
+                "llama3-70b-8192",
+                "mixtral-8x7b-32768",
+                "gemma2-9b-it"
+            ]
+            for pref in preferred_order:
+                if pref in model_ids:
+                    ACTIVE_GROQ_MODEL = pref
+                    print(f"✅ Đã tự động chọn Model Groq tối ưu: {ACTIVE_GROQ_MODEL}")
+                    return
+            if model_ids:
+                ACTIVE_GROQ_MODEL = model_ids[0]
+                print(f"✅ Chọn Model mặc định từ danh sách: {ACTIVE_GROQ_MODEL}")
+                return
+    except Exception as e:
+        print(f"⚠️ Lỗi kết nối kiểm tra Model Groq: {e}")
+
+    # Fallback mặc định
+    ACTIVE_GROQ_MODEL = "llama3-8b-8192"
 
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
@@ -74,12 +116,16 @@ async def load_sheet_data_async():
     tasks = [fetch_single_tab_raw(tab) for tab in ALL_TABS]
     results = await asyncio.gather(*tasks)
     RAM_CACHE = {tab: records for tab, records in results}
-    print("✅ [GROQ ENGINE] Đã nạp 100% dữ liệu Google Sheet vào RAM!")
+    print("✅ [CLOUD RUN] Đã nạp 100% dữ liệu RAM!")
     return {"status": "success"}
 
 @app.get("/")
 def health_check():
-    return {"status": "healthy", "service": "Trợ Lý KHO Groq Engine", "region": "asia-southeast1"}
+    return {
+        "status": "healthy", 
+        "active_groq_model": ACTIVE_GROQ_MODEL,
+        "region": "asia-southeast1"
+    }
 
 @app.get("/reload")
 async def reload_data():
@@ -136,7 +182,7 @@ def get_focused_knowledge(query: str, role: str) -> str:
     return knowledge_text
 
 # ==========================================
-# 1. CỔNG WEB VERCEL (/chat) - GROQ STREAM (0.2S)
+# 1. CỔNG WEB VERCEL (/chat) - TỰ ĐỘNG DÒ ENGINE
 # ==========================================
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -158,59 +204,93 @@ async def chat_stream(req: ChatRequest):
     {focused_knowledge}
     """
 
-    messages_payload = [{"role": "system", "content": system_instruction}]
-    trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
-    for m in trimmed:
-        role_type = "user" if m["role"] == "user" else "assistant"
-        messages_payload.append({"role": role_type, "content": m["text"]})
+    # Thử Groq API trước
+    if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
+        messages_payload = [{"role": "system", "content": system_instruction}]
+        trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
+        for m in trimmed:
+            role_type = "user" if m["role"] == "user" else "assistant"
+            messages_payload.append({"role": role_type, "content": m["text"]})
 
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": ACTIVE_GROQ_MODEL,
+            "messages": messages_payload,
+            "temperature": 0.1,
+            "max_tokens": 1000,
+            "stream": True
+        }
+
+        async def generate_groq():
+            try:
+                async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload) as response:
+                    if response.status_code == 200:
+                        async for line in response.aiter_lines():
+                            if line and line.startswith("data: "):
+                                data_str = line[6:].strip()
+                                if data_str == "[DONE]":
+                                    break
+                                try:
+                                    data_json = json.loads(data_str)
+                                    choices = data_json.get("choices", [])
+                                    if choices:
+                                        chunk = choices[0].get("delta", {}).get("content", "")
+                                        if chunk:
+                                            yield chunk
+                                except Exception:
+                                    pass
+                        return
+            except Exception:
+                pass
+            
+            # Nếu Groq lỗi, tự chuyển sang Gemini Stream
+            async for chunk in generate_gemini_stream(system_instruction, req.messages):
+                yield chunk
+
+        return StreamingResponse(generate_groq(), media_type="text/plain", headers={"Cache-Control": "no-cache"})
+
+    # Nếu không có Groq Key, chạy Gemini trực tiếp
+    return StreamingResponse(generate_gemini_stream(system_instruction, req.messages), media_type="text/plain", headers={"Cache-Control": "no-cache"})
+
+async def generate_gemini_stream(system_instruction: str, messages: list):
+    trimmed_messages = messages[-5:] if len(messages) > 5 else messages
+    gemini_contents = []
+    for m in trimmed_messages:
+        role_type = "user" if m["role"] == "user" else "model"
+        gemini_contents.append({"role": role_type, "parts": [{"text": m["text"]}]})
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
+    headers = {"Content-Type": "application/json"}
     payload = {
-        "model": MODEL_NAME,
-        "messages": messages_payload,
-        "temperature": 0.1,
-        "max_tokens": 1000,
-        "stream": True
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
+        "contents": gemini_contents,
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1000}
     }
-
-    async def generate():
-        try:
-            async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload) as response:
-                if response.status_code != 200:
-                    err_body = await response.aread()
-                    yield f"❌ Lỗi Groq API ({response.status_code}): {err_body.decode('utf-8')}"
-                    return
+    try:
+        async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload) as response:
+            if response.status_code == 200:
                 async for line in response.aiter_lines():
                     if line and line.startswith("data: "):
-                        data_str = line[6:].strip()
-                        if data_str == "[DONE]":
-                            break
+                        data_str = line[6:]
                         try:
                             data_json = json.loads(data_str)
-                            choices = data_json.get("choices", [])
-                            if choices:
-                                chunk = choices[0].get("delta", {}).get("content", "")
-                                if chunk:
-                                    yield chunk
+                            if "candidates" in data_json and len(data_json["candidates"]) > 0:
+                                chunk = data_json["candidates"][0]["content"]["parts"][0].get("text", "")
+                                if chunk: yield chunk
                         except Exception:
                             pass
-        except Exception as err:
-            yield f"❌ Lỗi kết nối Groq Engine: {str(err)}"
-
-    return StreamingResponse(generate(), media_type="text/plain", headers={"Cache-Control": "no-cache"})
+    except Exception as err:
+        yield f"❌ Lỗi AI: {str(err)}"
 
 # ==========================================
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - GROQ FAST (0.4S)
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat)
 # ==========================================
 def format_text_for_google_chat(text: str) -> str:
     text = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text)
     return text.replace(r'\rightarrow', '➔').replace(r'$\rightarrow$', '➔').replace('$', '').strip()
 
-async def call_groq_fast_google_chat(user_query: str) -> str:
+async def call_fast_ai(user_query: str) -> str:
     knowledge_context = get_focused_knowledge(user_query, role="Sale")
     system_instruction = f"""
     Bạn là Trợ Lý KHO Sapo trên Google Chat nội bộ.
@@ -219,31 +299,46 @@ async def call_groq_fast_google_chat(user_query: str) -> str:
     KHO TRI THỨC KỸ THUẬT:
     {knowledge_context}
     """
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": user_query}
-        ],
-        "temperature": 0.1,
-        "max_tokens": 800,
-        "stream": False
+
+    # 1. Thử Groq API trước (tốc độ 0.3s)
+    if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": ACTIVE_GROQ_MODEL,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_query}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 800
+        }
+        try:
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=3.5)
+            if res.status_code == 200:
+                data = res.json()
+                raw_reply = data["choices"][0]["message"]["content"]
+                return format_text_for_google_chat(raw_reply)
+        except Exception:
+            pass
+
+    # 2. Dự phòng Gemini 3.6 Flash
+    url_gemini = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
+    payload_gemini = {
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
+        "contents": [{"role": "user", "parts": [{"text": user_query}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 600}
     }
     try:
-        res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=3.5)
+        res = await HTTP_CLIENT.post(url_gemini, json=payload_gemini, timeout=3.8)
         if res.status_code == 200:
             data = res.json()
-            raw_reply = data["choices"][0]["message"]["content"]
+            raw_reply = data["candidates"][0]["content"]["parts"][0]["text"]
             return format_text_for_google_chat(raw_reply)
     except Exception as e:
-        print(f"Lỗi Groq Fast: {e}")
-        return "❌ Hệ thống đang bận, vui lòng thử lại với câu hỏi cụ thể hơn."
-    return "❌ Dữ liệu không phản hồi từ Groq Engine."
+        return f"❌ Hệ thống phản hồi chậm, bạn vui lòng gõ câu hỏi cụ thể hơn nhé."
+        
+    return "❌ Dữ liệu chưa sẵn sàng."
 
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -252,7 +347,7 @@ async def google_chat_webhook(request: Request):
         event_type = event.get("type")
 
         if event_type == "ADDED_TO_SPACE":
-            return JSONResponse(content={"text": "👋 Xin chào! Tôi là *Trợ Lý KHO Sapo* (Groq UltraFast). Hãy gõ câu hỏi kỹ thuật để tôi hỗ trợ ngay 24/7!"})
+            return JSONResponse(content={"text": "👋 Xin chào! Tôi là *Trợ Lý KHO Sapo*. Hãy gõ câu hỏi kỹ thuật để tôi hỗ trợ ngay 24/7!"})
 
         if event_type == "MESSAGE":
             user_message = event.get("message", {}).get("text", "")
@@ -264,7 +359,7 @@ async def google_chat_webhook(request: Request):
                     "text": "👋 Xin chào! Em là *Trợ Lý KHO Sapo*. Anh/chị cần hỗ trợ tra cứu thông số máy in, cài đặt driver hay khắc phục lỗi gì ạ?"
                 })
 
-            ai_reply = await call_groq_fast_google_chat(cleaned_message)
+            ai_reply = await call_fast_ai(cleaned_message)
             return JSONResponse(content={"text": ai_reply})
 
     except Exception as e:
