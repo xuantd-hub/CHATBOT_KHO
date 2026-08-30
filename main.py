@@ -4,12 +4,12 @@ import json
 import asyncio
 import pandas as pd
 import httpx
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Enterprise Cloud Engine", version="100.0")
+app = FastAPI(title="Trợ Lý KHO Enterprise Cloud & Google Chat", version="102.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,7 +38,6 @@ HTTP_CLIENT: httpx.AsyncClient = None
 @app.on_event("startup")
 async def startup_event():
     global HTTP_CLIENT
-    # Tối ưu hóa Connection Pool kết nối trực tiếp Google AI Backbone
     HTTP_CLIENT = httpx.AsyncClient(
         timeout=httpx.Timeout(20.0, read=40.0),
         limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
@@ -58,7 +57,6 @@ async def fetch_single_tab_raw(tab: str):
             df = pd.read_csv(io.BytesIO(res.content)).fillna("")
             records = []
             for _, row in df.iterrows():
-                # Giữ nguyên 100% các dòng, các cột và dấu xuống dòng trong ô Sheet
                 row_data = {str(k): str(v).strip() for k, v in row.items() if str(v).strip()}
                 if row_data:
                     records.append(row_data)
@@ -72,12 +70,12 @@ async def load_sheet_data_async():
     tasks = [fetch_single_tab_raw(tab) for tab in ALL_TABS]
     results = await asyncio.gather(*tasks)
     RAM_CACHE = {tab: records for tab, records in results}
-    print("✅ [CLOUD RUN] Đã nạp thành công 100% dữ liệu thô vào RAM!")
+    print("✅ [CLOUD RUN] Đã nạp 100% dữ liệu RAM!")
     return {"status": "success"}
 
 @app.get("/")
 def health_check():
-    return {"status": "healthy", "service": "Trợ Lý KHO Engine", "region": "asia-southeast1"}
+    return {"status": "healthy", "service": "Trợ Lý KHO Engine Full", "region": "asia-southeast1"}
 
 @app.get("/reload")
 async def reload_data():
@@ -91,137 +89,121 @@ class SaleAuthRequest(BaseModel):
 def verify_sale(req: SaleAuthRequest):
     email = req.email.strip().lower()
     passcode = req.passcode.strip()
-    
     if not email.endswith("@sapo.vn"):
         return {"success": False, "message": "Email phải có đuôi @sapo.vn!"}
-        
     if passcode == SALE_SECRET_KEY:
         return {"success": True, "message": "Xác thực Sale thành công!"}
-    else:
-        return {"success": False, "message": "Mật khẩu nội bộ chưa chính xác!"}
+    return {"success": False, "message": "Mật khẩu nội bộ chưa chính xác!"}
 
 class ChatRequest(BaseModel):
     messages: list
     role: str = "Khach_Hang"
 
-def get_smart_focused_knowledge(query: str, role: str) -> str:
-    stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "máy", "thế", "nào", "bao", "nhiêu"}
-    words = [w.lower() for w in query.split() if len(w) > 1 and w.lower() not in stop_words]
-    if not words:
-        words = [query.lower()]
-
+def get_full_accessible_knowledge(role: str) -> str:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
-    scored_rows = []
-
+    full_data = {}
     for tab in accessible_tabs:
-        for row in RAM_CACHE.get(tab, []):
-            row_text = " ".join(str(v).lower() for v in row.values())
-            score = 0
-            for w in words:
-                if w in row_text:
-                    score += 1
-            
-            model_name = str(row.get("Ten_Thiet_Bi", "")).lower()
-            if any(w in model_name for w in words):
-                score += 10
+        full_data[tab] = RAM_CACHE.get(tab, [])
+    return json.dumps(full_data, ensure_ascii=False, separators=(',', ':'))
 
-            if score > 0:
-                scored_rows.append((score, tab, row))
-
-    scored_rows.sort(key=lambda x: x[0], reverse=True)
-    top_matches = scored_rows[:8]
-
-    if not top_matches:
-        return "Không tìm thấy dữ liệu khớp lệnh trong Kho Tri Thức. Hãy dựa vào thông tin kỹ thuật sẵn có để hỗ trợ nhẹ nhàng."
-
-    knowledge_text = ""
-    for score, tab, row in top_matches:
-        knowledge_text += f"\n--- [Nguồn: {tab}] ---\n"
-        for key, value in row.items():
-            knowledge_text += f"{key}: {value}\n"
+async def ask_gemini_full_text(user_query: str, role: str = "Sale") -> str:
+    """Hàm xử lý đồng bộ câu hỏi từ Google Chat"""
+    knowledge_context = get_full_accessible_knowledge(role)
+    system_instruction = f"""
+    Bạn là Trợ Lý KHO Sapo trên Google Chat nội bộ. Tận tâm, thông minh và chính xác 100%.
+    Nhiệm vụ: Đọc Kho Tri Thức và trả lời câu hỏi của nhân viên. Tóm tắt các bước rành mạch, cung cấp link Driver/Video bằng Markdown.
     
-    return knowledge_text
+    KHO TRI THỨC:
+    {knowledge_context}
+    """
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
+        "contents": [{"role": "user", "parts": [{"text": user_query}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2048}
+    }
+    try:
+        res = await HTTP_CLIENT.post(url, json=payload, timeout=15.0)
+        if res.status_code == 200:
+            data = res.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception as e:
+        return f"❌ Lỗi xử lý AI: {str(e)}"
+    return "❌ Dữ liệu không phản hồi."
 
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
-    focused_knowledge = get_smart_focused_knowledge(latest_msg, req.role)
+    full_knowledge_context = get_full_accessible_knowledge(req.role)
 
     system_instruction = f"""
-    Bạn là Trợ Lý KHO – Chuyên gia tư vấn & kỹ thuật phần cứng Sapo. Thông minh, tận tâm và chuyên nghiệp.
-
-    NHIỆM VỤ CỦA BẠN (TUÂN THỦ 100%):
-    1. Đọc thật kỹ các "Khối Thông Tin" được trích xuất từ Kho Tri Thức dưới đây.
-    2. TẬN DỤNG TỐI ĐA SỰ THÔNG MINH: Giải thích chi tiết rành mạch từng bước (Bước 1, Bước 2...) cho khách hàng dễ thao tác.
-    3. Trích xuất ĐẦY ĐỦ các link Driver Win/Mac/Video dưới dạng Markdown `[Tên hiển thị](URL)`.
-    4. CHÍNH XÁC TUYỆT ĐỐI (ZERO HALLUCINATION): Chỉ cung cấp địa chỉ, SĐT, thông số có trong Kho Tri Thức. Nếu dữ liệu thiếu, báo nhẹ nhàng chưa cập nhật và hướng dẫn liên hệ Tổng đài Sapo. TUYỆT ĐỐI KHÔNG BỊA ĐẶT.
-    5. ĐỊNH DẠNG: Dùng `➔` hoặc `->` chỉ hướng. Xưng danh "Trợ Lý KHO". KHÔNG dùng LaTeX (`$\\rightarrow$`).
-
-    BẢO MẬT PHÂN QUYỀN (ROLE HIỆN TẠI: {req.role}):
-    - Role 'Khach_Hang': Dữ liệu bảo hành nội bộ đã được khóa 100% từ Server.
-    - Role 'Sale': Mở khóa đầy đủ thông tin bảo hành nội bộ, SĐT kỹ thuật trực ca.
-
-    KHO TRI THỨC TRÍCH XUẤT CHO CÂU HỎI NÀY:
-    {focused_knowledge}
+    Bạn là Trợ Lý KHO – Chuyên gia tư vấn & kỹ thuật phần cứng Sapo.
+    KHO TRI THỨC TOÀN DIỆN:
+    {full_knowledge_context}
     """
-
     trimmed_messages = req.messages[-5:] if len(req.messages) > 5 else req.messages
     gemini_contents = []
     for m in trimmed_messages:
         role_type = "user" if m["role"] == "user" else "model"
-        gemini_contents.append({
-            "role": role_type,
-            "parts": [{"text": m["text"]}]
-        })
+        gemini_contents.append({"role": role_type, "parts": [{"text": m["text"]}]})
 
-    # Cố định model đỉnh cao gemini-3.6-flash
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
     headers = {"Content-Type": "application/json"}
     payload = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": gemini_contents,
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 2500
-        }
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 3000}
     }
 
     async def generate():
-        has_yielded = False
         try:
             async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload) as response:
                 if response.status_code != 200:
                     err_body = await response.aread()
                     yield f"❌ Lỗi API Google ({response.status_code}): {err_body.decode('utf-8')}"
                     return
-
                 async for line in response.aiter_lines():
                     if line and line.startswith("data: "):
                         data_str = line[6:]
                         try:
                             data_json = json.loads(data_str)
                             if "candidates" in data_json and len(data_json["candidates"]) > 0:
-                                candidate = data_json["candidates"][0]
-                                if "content" in candidate and "parts" in candidate["content"]:
-                                    chunk = candidate["content"]["parts"][0].get("text", "")
-                                    if chunk:
-                                        has_yielded = True
-                                        yield chunk
+                                chunk = data_json["candidates"][0]["content"]["parts"][0].get("text", "")
+                                if chunk: yield chunk
                         except Exception:
                             pass
         except Exception as err:
             yield f"❌ Lỗi kết nối Google AI: {str(err)}"
-            return
 
-        if not has_yielded:
-            yield "❌ Lỗi: Máy chủ Google AI không trả về dữ liệu."
+    return StreamingResponse(generate(), media_type="text/plain", headers={"Cache-Control": "no-cache"})
 
-    return StreamingResponse(
-        generate(), 
-        media_type="text/plain",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )
+# ==========================================
+# ENDPOINT DÀNH RIÊNG CHO GOOGLE CHAT BOT
+# ==========================================
+@app.post("/google-chat")
+async def google_chat_webhook(request: Request):
+    try:
+        event = await request.json()
+        event_type = event.get("type")
+
+        # Khi nhân viên vừa bấm thêm Bot vào Google Chat
+        if event_type == "ADDED_TO_SPACE":
+            return JSONResponse({
+                "text": "👋 Xin chào! Tôi là **Trợ Lý KHO Sapo**. Hãy gõ mã thiết bị hoặc triệu chứng lỗi để tôi hỗ trợ ngay 24/7!"
+            })
+
+        # Khi nhân viên gõ tin nhắn cho Bot
+        if event_type == "MESSAGE":
+            user_message = event.get("message", {}).get("text", "")
+            # Loại bỏ phần tag tên Bot nếu chat trong nhóm
+            cleaned_message = user_message.replace("@Trợ Lý KHO Sapo", "").strip()
+            
+            # Vì tin nhắn từ Google Chat công ty luôn thuộc về nhân viên Sapo -> Mặc định gán Role = 'Sale'
+            ai_reply = await ask_gemini_full_text(cleaned_message, role="Sale")
+            
+            return JSONResponse({"text": ai_reply})
+
+    except Exception as e:
+        return JSONResponse({"text": f"❌ Lỗi hệ thống Bot: {str(e)}"})
+
+    return JSONResponse({"text": "Đã nhận sự kiện."})
