@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trợ Lý KHO - Hệ Thống Hỗ Trợ Kỹ Thuật</title>
+    <title>Trợ Lý KHO - Hệ Thống Hỗ Trợ Kỹ Thuật Sapo</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -22,7 +22,6 @@
         .markdown-body li { margin-bottom: 0.25rem; }
         .markdown-body img { max-width: 100%; border-radius: 0.75rem; margin: 0.5rem 0; border: 1px solid #e2e8f0; }
         
-        /* Hiệu ứng 3 chấm nảy khi chờ phản hồi */
         .dot-flashing {
             position: relative;
             width: 6px;
@@ -30,8 +29,8 @@
             border-radius: 5px;
             background-color: #6366f1;
             color: #6366f1;
-            animation: dot-flashing 1s infinite linear alternate;
-            animation-delay: 0.5s;
+            animation: dot-flashing 0.8s infinite linear alternate;
+            animation-delay: 0.4s;
         }
         .dot-flashing::before, .dot-flashing::after {
             content: "";
@@ -46,13 +45,13 @@
         }
         .dot-flashing::before {
             left: -10px;
-            animation: dot-flashing 1s infinite alternate;
+            animation: dot-flashing 0.8s infinite alternate;
             animation-delay: 0s;
         }
         .dot-flashing::after {
             left: 10px;
-            animation: dot-flashing 1s infinite alternate;
-            animation-delay: 1s;
+            animation: dot-flashing 0.8s infinite alternate;
+            animation-delay: 0.8s;
         }
         @keyframes dot-flashing {
             0% { background-color: #6366f1; }
@@ -70,7 +69,7 @@
             </div>
             <div>
                 <h1 class="font-bold text-base leading-tight flex items-center gap-2">
-                    Trợ Lý KHO <span class="text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30">Online</span>
+                    Trợ Lý KHO <span class="text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30">v3.6 Active</span>
                 </h1>
                 <p class="text-xs text-indigo-300/80 font-normal">Hỗ trợ chẩn đoán sự cố & kỹ thuật Sapo</p>
             </div>
@@ -122,7 +121,7 @@
                 <p class="text-slate-600">Em hỗ trợ chẩn đoán sự cố, hướng dẫn cài đặt máy in hóa đơn, máy quét mã vạch, máy POS và khay đựng tiền Sapo.</p>
                 <div class="text-xs text-slate-500 bg-slate-50 p-3 rounded-2xl border border-slate-100 flex items-center gap-2 mt-2">
                     <i class="fa-solid fa-circle-info text-indigo-500 text-sm"></i>
-                    <span>Dữ liệu hướng dẫn kỹ thuật được kết nối trực tiếp từ thu viện kho. Dịch vụ hỗ trợ 24/7.</span>
+                    <span>Dữ liệu hướng dẫn kỹ thuật được kết nối trực tiếp từ Google Sheet kho Sapo. Hỗ trợ 24/7.</span>
                 </div>
             </div>
         </div>
@@ -153,30 +152,55 @@
     <div id="sale-auth-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 border border-slate-100">
             <div class="text-center space-y-1">
-                <div class="w-12 h-12 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mx-auto text-xl">
-                    <i class="fa-solid fa-lock"></i>
+                <div class="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto text-xl">
+                    <i class="fa-solid fa-user-shield"></i>
                 </div>
                 <h3 class="font-bold text-slate-800 text-base">Xác minh Sale Nội Bộ</h3>
-                <p class="text-xs text-slate-500">Nhập mã PIN để mở khóa quyền xem thông tin bảo hành</p>
+                <p class="text-xs text-slate-500">Nhập Email Sapo & Mật khẩu để mở quyền Sale</p>
             </div>
-            <input 
-                type="password" 
-                id="sale-pin-input" 
-                placeholder="Mã PIN (Mặc định: 1234)" 
-                class="w-full text-center tracking-widest text-lg bg-slate-100 border border-slate-300 focus:border-indigo-500 focus:outline-none p-3 rounded-2xl"
-                maxlength="6"
-            />
-            <div class="flex gap-2">
+            
+            <div class="space-y-3">
+                <div>
+                    <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">Email Sapo (*)</label>
+                    <input 
+                        type="email" 
+                        id="sale-email-input" 
+                        placeholder="tennhanvien@sapo.vn" 
+                        class="w-full text-sm bg-slate-100 border border-slate-300 focus:border-indigo-500 focus:bg-white focus:outline-none px-3.5 py-2.5 rounded-xl"
+                    />
+                </div>
+                <div>
+                    <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">Mật khẩu Sale (*)</label>
+                    <input 
+                        type="password" 
+                        id="sale-pin-input" 
+                        placeholder="Mật khẩu nội bộ" 
+                        class="w-full text-sm bg-slate-100 border border-slate-300 focus:border-indigo-500 focus:bg-white focus:outline-none px-3.5 py-2.5 rounded-xl"
+                    />
+                </div>
+            </div>
+
+            <div class="flex gap-2 pt-1">
                 <button onclick="closeSaleModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-2xl text-xs font-semibold">Hủy</button>
-                <button onclick="verifySalePin()" class="flex-1 bg-indigo-700 hover:bg-indigo-800 text-white py-2.5 rounded-2xl text-xs font-semibold shadow-md">Xác nhận</button>
+                <button onclick="verifySalePin()" id="btn-submit-sale" class="flex-1 bg-indigo-700 hover:bg-indigo-800 text-white py-2.5 rounded-2xl text-xs font-semibold shadow-md flex items-center justify-center gap-1">
+                    <span>Xác nhận</span>
+                </button>
             </div>
         </div>
     </div>
 
     <script>
-        const BACKEND_URL = " https://chatbot-kho.onrender.com";
+        const BACKEND_URL = "https://chatbot-kho.onrender.com";
         let currentRole = "Khach_Hang";
         let chatHistory = [];
+
+        // Khôi phục vai trò Sale tự động nếu đã xác thực trước đó trên thiết bị này
+        window.addEventListener("DOMContentLoaded", () => {
+            const savedRole = localStorage.getItem("sapo_user_role");
+            if (savedRole === "Sale") {
+                setRole("Sale");
+            }
+        });
 
         const renderer = new marked.Renderer();
         renderer.link = function(href, title, text) {
@@ -234,9 +258,11 @@
             if (role === 'Khach_Hang') {
                 btnCustomer.className = "px-3 py-1.5 rounded-lg font-medium transition-all bg-indigo-600 text-white shadow-sm";
                 btnSale.className = "px-3 py-1.5 rounded-lg font-medium transition-all text-indigo-300 hover:text-white";
+                localStorage.removeItem("sapo_user_role");
             } else {
                 btnSale.className = "px-3 py-1.5 rounded-lg font-medium transition-all bg-amber-600 text-white shadow-sm";
                 btnCustomer.className = "px-3 py-1.5 rounded-lg font-medium transition-all text-indigo-300 hover:text-white";
+                localStorage.setItem("sapo_user_role", "Sale");
             }
         }
 
@@ -244,22 +270,52 @@
             if (currentRole === 'Sale') return;
             document.getElementById("sale-auth-modal").classList.remove("hidden");
             document.getElementById("sale-auth-modal").classList.add("flex");
-            document.getElementById("sale-pin-input").focus();
+            document.getElementById("sale-email-input").focus();
         }
 
         function closeSaleModal() {
             document.getElementById("sale-auth-modal").classList.add("hidden");
             document.getElementById("sale-auth-modal").classList.remove("flex");
+            document.getElementById("sale-email-input").value = "";
             document.getElementById("sale-pin-input").value = "";
         }
 
-        function verifySalePin() {
-            const pin = document.getElementById("sale-pin-input").value;
-            if (pin === "1234") {
-                setRole('Sale');
-                closeSaleModal();
-            } else {
-                alert("Mã PIN không chính xác! Vui lòng thử lại.");
+        async function verifySalePin() {
+            const email = document.getElementById("sale-email-input").value.trim();
+            const pin = document.getElementById("sale-pin-input").value.trim();
+
+            if (!email || !pin) {
+                alert("Vui lòng nhập đầy đủ Email và Mật khẩu!");
+                return;
+            }
+
+            if (!email.toLowerCase().endsWith("@sapo.vn")) {
+                alert("Email bắt buộc phải có đuôi @sapo.vn!");
+                return;
+            }
+
+            const btnSubmit = document.getElementById("btn-submit-sale");
+            btnSubmit.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`;
+
+            try {
+                const res = await fetch(`${BACKEND_URL}/verify-sale`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email: email, passcode: pin })
+                });
+
+                const data = await res.json();
+                if (data.success) {
+                    setRole('Sale');
+                    closeSaleModal();
+                    alert("✅ " + data.message);
+                } else {
+                    alert("❌ " + data.message);
+                }
+            } catch (err) {
+                alert("❌ Lỗi kết nối máy chủ xác thực!");
+            } finally {
+                btnSubmit.innerHTML = `<span>Xác nhận</span>`;
             }
         }
 
@@ -340,7 +396,6 @@
                         isFirstChunk = false;
                     }
 
-                    // Làm sạch cú pháp dở dang trước khi render Markdown
                     let cleanedText = fullText
                         .replace(/\\\$/g, '')
                         .replace(/\\rightarrow/g, '➔')
