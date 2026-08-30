@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Master Smart", version="100.0")
+app = FastAPI(title="Trợ Lý KHO Master Smart", version="100.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -85,11 +85,14 @@ def verify_sale(req: SaleAuthRequest):
     email = req.email.strip().lower()
     passcode = req.passcode.strip()
     
+    # Đoạn này đã được căn chỉnh thụt lề (indentation) chuẩn xác
     if not email.endswith("@sapo.vn"):
         return {"success": False, "message": "Email phải có đuôi @sapo.vn!"}
-        if passcode == SALE_SECRET_KEY:
+        
+    if passcode == SALE_SECRET_KEY:
         return {"success": True, "message": "Xác thực Sale thành công!"}
-    return {"success": False, "message": "Mật khẩu nội bộ chưa chính xác!"}
+    else:
+        return {"success": False, "message": "Mật khẩu nội bộ chưa chính xác!"}
 
 class ChatRequest(BaseModel):
     messages: list
