@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Master Final", version="99.0")
+app = FastAPI(title="Trợ Lý KHO Master Smart", version="100.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,7 +22,8 @@ SHEET_ID = "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
-RAM_MARKDOWN_CACHE = {}
+# Bộ nhớ RAM lưu trữ dữ liệu nguyên bản (Raw Data)
+RAM_CACHE = {}
 
 TABS_PUBLIC = [
     "1_THIET_BI_VA_LOI", 
@@ -38,7 +39,6 @@ HTTP_CLIENT: httpx.AsyncClient = None
 @app.on_event("startup")
 async def startup_event():
     global HTTP_CLIENT
-    # Keep-alive connection để truy xuất AI không độ trễ
     HTTP_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(20.0, read=40.0))
     await load_sheet_data_async()
 
@@ -47,35 +47,30 @@ async def shutdown_event():
     if HTTP_CLIENT:
         await HTTP_CLIENT.aclose()
 
-async def fetch_single_tab_markdown(tab: str):
+async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
     try:
-        res = await HTTP_CLIENT.get(url, timeout=10.0)
+        res = await HTTP_CLIENT.get(url, timeout=8.0)
         if res.status_code == 200 and "text/csv" in res.headers.get("Content-Type", ""):
             df = pd.read_csv(io.BytesIO(res.content)).fillna("")
-            if not df.empty:
-                # Dựng bảng Markdown chuẩn xác 100% bằng Python thuần (chống crash thư viện)
-                headers_str = "| " + " | ".join(df.columns.astype(str)) + " |"
-                separator_str = "| " + " | ".join(["---"] * len(df.columns)) + " |"
-                
-                lines = [f"### BẢNG DỮ LIỆU TAB: {tab}", headers_str, separator_str]
-                for _, row in df.iterrows():
-                    # Xóa ký tự xuống dòng trong ô để không làm vỡ cấu trúc bảng
-                    row_vals = [str(v).strip().replace('\n', ' ') for v in row.values]
-                    lines.append("| " + " | ".join(row_vals) + " |")
-                
-                return tab, "\n".join(lines) + "\n\n"
+            records = []
+            for _, row in df.iterrows():
+                # Giữ nguyên 100% dữ liệu, không xóa dấu xuống dòng (\n)
+                row_data = {str(k): str(v).strip() for k, v in row.items() if str(v).strip()}
+                if row_data:
+                    records.append(row_data)
+            return tab, records
     except Exception as e:
         print(f"⚠️ Lỗi tab '{tab}': {e}")
-    return tab, f"### BẢNG DỮ LIỆU TAB: {tab}\n(Trống)\n\n"
+    return tab, []
 
 async def load_sheet_data_async():
-    global RAM_MARKDOWN_CACHE
-    tasks = [fetch_single_tab_markdown(tab) for tab in ALL_TABS]
+    global RAM_CACHE
+    tasks = [fetch_single_tab_raw(tab) for tab in ALL_TABS]
     results = await asyncio.gather(*tasks)
-    RAM_MARKDOWN_CACHE = {tab: md_content for tab, md_content in results}
-    print("✅ Đã nạp thành công 100% dữ liệu Google Sheet!")
-    return {"status": "success", "loaded_tabs": list(RAM_MARKDOWN_CACHE.keys())}
+    RAM_CACHE = {tab: records for tab, records in results}
+    print("✅ Đã nạp 100% dữ liệu thô, giữ nguyên mọi chi tiết và dấu xuống dòng!")
+    return {"status": "success"}
 
 @app.get("/reload")
 async def reload_data():
@@ -92,52 +87,87 @@ def verify_sale(req: SaleAuthRequest):
     
     if not email.endswith("@sapo.vn"):
         return {"success": False, "message": "Email phải có đuôi @sapo.vn!"}
-        
-    if passcode == SALE_SECRET_KEY:
+        if passcode == SALE_SECRET_KEY:
         return {"success": True, "message": "Xác thực Sale thành công!"}
-    else:
-        return {"success": False, "message": "Mật khẩu nội bộ chưa chính xác!"}
+    return {"success": False, "message": "Mật khẩu nội bộ chưa chính xác!"}
 
 class ChatRequest(BaseModel):
     messages: list
     role: str = "Khach_Hang"
 
-def get_100_percent_knowledge(role: str) -> str:
-    """ Truyền 100% dữ liệu. Khách hàng bị chặn hoàn toàn Tab 4 ở cấp độ Server """
+def get_smart_focused_knowledge(query: str, role: str) -> str:
+    """
+    Tìm kiếm thông minh: Bốc đúng dòng dữ liệu liên quan và xuất TRỌN VẸN nội dung dòng đó,
+    giữ nguyên mọi định dạng, link, và bước hướng dẫn.
+    """
+    stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "máy", "thế", "nào", "bao", "nhiêu"}
+    words = [w.lower() for w in query.split() if len(w) > 1 and w.lower() not in stop_words]
+    
+    if not words:
+        words = [query.lower()]
+
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
-    full_md = ""
+    scored_rows = []
+
     for tab in accessible_tabs:
-        full_md += RAM_MARKDOWN_CACHE.get(tab, "")
-    return full_md
+        for row in RAM_CACHE.get(tab, []):
+            row_text = " ".join(str(v).lower() for v in row.values())
+            
+            # Tính điểm độ phù hợp của dòng dữ liệu
+            score = 0
+            for w in words:
+                if w in row_text:
+                    score += 1
+            
+            # Ưu tiên cực cao nếu khớp chính xác tên thiết bị (VD: G8, K200L, SPL01)
+            model_name = str(row.get("Ten_Thiet_Bi", "")).lower()
+            if any(w in model_name for w in words):
+                score += 10
+
+            if score > 0:
+                scored_rows.append((score, tab, row))
+
+    # Sắp xếp lấy những dòng có điểm cao nhất (liên quan nhất)
+    scored_rows.sort(key=lambda x: x[0], reverse=True)
+    top_matches = scored_rows[:6] # Lấy 6 dòng liên quan nhất để bao quát đủ thông tin
+
+    if not top_matches:
+        # Nếu không tìm thấy, nạp thông tin chung
+        return "Không tìm thấy dữ liệu khớp lệnh. Dựa vào kiến thức sẵn có, hãy tư vấn nhẹ nhàng."
+
+    # Xây dựng văn bản gửi AI (Giữ nguyên cấu trúc Key-Value Block)
+    knowledge_text = ""
+    for score, tab, row in top_matches:
+        knowledge_text += f"\n--- [Nguồn: {tab}] ---\n"
+        for key, value in row.items():
+            knowledge_text += f"{key}: {value}\n"
+    
+    return knowledge_text
 
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
-    # Nạp nguyên bản 100% dữ liệu
-    knowledge_context = get_100_percent_knowledge(req.role)
+    latest_msg = req.messages[-1]["text"] if req.messages else ""
+    focused_knowledge = get_smart_focused_knowledge(latest_msg, req.role)
 
     system_instruction = f"""
-    Bạn là Trợ Lý KHO – Trợ lý chuyên gia kỹ thuật và chẩn đoán phần cứng của Sapo.
+    Bạn là Trợ Lý KHO – Chuyên gia tư vấn & kỹ thuật phần cứng của Sapo. Thông minh, tận tâm và chuyên nghiệp.
 
-    LỆNH VẬN HÀNH TUYỆT ĐỐI (PHẢI TUÂN THỦ 100%):
-    1. ĐỘ CHÍNH XÁC & TRÍCH XUẤT DỮ LIỆU:
-       - Bạn được cung cấp Bảng Dữ Liệu bên dưới. TẤT CẢ câu trả lời phải lấy trực tiếp từ Bảng Dữ Liệu này.
-       - Khi trả lời hướng dẫn cài đặt hoặc xử lý lỗi: BẮT BUỘC liệt kê đầy đủ 100% các bước kỹ thuật chi tiết. KHÔNG tự ý tóm tắt, KHÔNG rút gọn.
-       - BẮT BUỘC xuất chính xác các đường link Driver/Video bằng cú pháp Markdown `[Tên hiển thị](URL)`. KHÔNG bao giờ được bỏ dở link.
-    2. CHỐNG BỊA ĐẶT (ZERO HALLUCINATION):
-       - TUYỆT ĐỐI KHÔNG tự bịa ra địa chỉ, số điện thoại, hay chính sách bảo hành nếu nó không có trong Bảng Dữ Liệu.
-       - Nếu dữ liệu không có, phản hồi: "Dữ liệu hiện tại chưa cập nhật thông tin này, vui lòng tham khảo https://shop.sapo.vn hoặc liên hệ Tổng đài Sapo."
-    3. BẢO MẬT & PHÂN QUYỀN (ROLE: {req.role}):
-       - Trạng thái Khách Hàng: KHÔNG ĐƯỢC tiết lộ thông tin nội bộ (bởi vì dữ liệu nội bộ đã bị ẩn).
-       - Trạng thái Sale: Cung cấp đầy đủ thông tin bảo hành, SĐT kỹ thuật nội bộ, ghi chú.
-    4. TRÌNH BÀY:
-       - Xưng danh là "Trợ Lý KHO".
-       - Dùng ký tự `➔` để hướng dẫn bấm menu. KHÔNG dùng LaTeX.
+    NHIỆM VỤ CỦA BẠN:
+    1. Đọc thật kỹ các "Khối Thông Tin" được trích xuất từ Kho Tri Thức dưới đây.
+    2. Nếu thông tin có phần "Nội dung hướng dẫn": BẮT BUỘC bạn phải giải thích lại rõ ràng, rành mạch từng bước (Bước 1, Bước 2...) một cách thông minh cho khách dễ hiểu. KHÔNG được chỉ quăng mỗi link.
+    3. Đính kèm đầy đủ link tải Driver/Video bằng Markdown `[Tên](Link)` đan xen vào các bước hoặc để ở cuối.
+    4. Trả lời tự nhiên, lịch sự. Nếu dữ liệu không có thông tin khách hỏi, hãy nhẹ nhàng báo chưa cập nhật và hướng dẫn liên hệ Tổng đài Sapo. Đừng trả lời cộc lốc.
+    5. ĐỊNH DẠNG: Dùng `➔` để chỉ hướng. Tên bạn là "Trợ Lý KHO".
 
-    BẢNG DỮ LIỆU KHO TRI THỨC (TRỌN VẸN 100%):
-    {knowledge_context}
+    BẢO MẬT (ROLE: {req.role}):
+    - Nếu là Khách Hàng: Dữ liệu nhạy cảm đã bị hệ thống chặn, cứ tư vấn bình thường.
+    - Nếu là Sale: Bạn sẽ thấy có thông tin nội bộ (Tab 4), hãy cung cấp đầy đủ cho Sale.
+
+    KHO TRI THỨC ĐƯỢC TRÍCH XUẤT CHO CÂU HỎI NÀY:
+    {focused_knowledge}
     """
 
-    trimmed_messages = req.messages[-4:] if len(req.messages) > 4 else req.messages
+    trimmed_messages = req.messages[-5:] if len(req.messages) > 5 else req.messages
     gemini_contents = []
     for m in trimmed_messages:
         role_type = "user" if m["role"] == "user" else "model"
@@ -146,15 +176,14 @@ async def chat_stream(req: ChatRequest):
             "parts": [{"text": m["text"]}]
         })
 
-    # Cố định model 3.6 flash siêu tốc
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
     headers = {"Content-Type": "application/json"}
     payload = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": gemini_contents,
         "generationConfig": {
-            "temperature": 0.0, # 0.0 đảm bảo không bao giờ bịa chữ, chính xác tuyệt đối với Sheet
-            "maxOutputTokens": 4096 # Cho phép trả lời bài siêu dài nếu cần
+            "temperature": 0.2, # Giúp AI nói chuyện thông minh, tự nhiên nhưng không bịa đặt
+            "maxOutputTokens": 2048
         }
     }
 
