@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "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").strip()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
 RAM_CACHE = {}
