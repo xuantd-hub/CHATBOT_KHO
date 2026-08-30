@@ -23,8 +23,8 @@ SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
-# Mô hình Llama 3.3 70B Versatile siêu tốc trên chip Groq LPU
-MODEL_NAME = "llama-3.3-70b-versatile"
+# Đổi tên model sang bản ổn định và siêu tốc 100% của Groq
+MODEL_NAME = "llama-3.1-8b-instant"
 
 RAM_CACHE = {}
 
