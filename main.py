@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Engine", version="15.0")
+app = FastAPI(title="Trợ Lý KHO Engine", version="16.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,7 +31,7 @@ TABS = [
 async def fetch_single_tab(client: httpx.AsyncClient, tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
     try:
-        res = await client.get(url, timeout=8.0)
+        res = await client.get(url, timeout=6.0)
         if res.status_code == 200 and "text/csv" in res.headers.get("Content-Type", ""):
             df = pd.read_csv(io.BytesIO(res.content)).fillna("")
             records = df.to_dict(orient="records")
@@ -51,9 +51,8 @@ async def load_sheet_data_async():
         tasks = [fetch_single_tab(client, tab) for tab in TABS]
         results = await asyncio.gather(*tasks)
         
-    temp_cache = {tab: records for tab, records in results}
-    RAM_CACHE = temp_cache
-    print("✅ Đã nạp song song siêu tốc dữ liệu Google Sheet vào RAM!")
+    RAM_CACHE = {tab: records for tab, records in results}
+    print("✅ Đã nạp dữ liệu Google Sheet vào RAM!")
     return {"status": "success", "loaded_tabs": list(RAM_CACHE.keys())}
 
 @app.on_event("startup")
@@ -79,13 +78,12 @@ def filter_relevant_knowledge(latest_user_msg: str) -> str:
             if any(word in row_text for word in query_words):
                 matched_rows.append(row)
         if matched_rows:
-            filtered_data[tab_name] = matched_rows[:5]
+            filtered_data[tab_name] = matched_rows[:3]
 
     if not filtered_data:
         filtered_data = {
-            "LUONG_CHAN_DOAN": RAM_CACHE.get("LUONG_CHAN_DOAN", [])[:3],
-            "QUY_TRINH_CHUNG": RAM_CACHE.get("QUY_TRINH_CHUNG", [])[:2],
-            "QUY_TRINH_LEO_THANG": RAM_CACHE.get("QUY_TRINH_LEO_THANG", [])[:2]
+            "LUONG_CHAN_DOAN": RAM_CACHE.get("LUONG_CHAN_DOAN", [])[:2],
+            "QUY_TRINH_CHUNG": RAM_CACHE.get("QUY_TRINH_CHUNG", [])[:2]
         }
 
     return json.dumps(filtered_data, ensure_ascii=False, separators=(',', ':'))
@@ -98,33 +96,29 @@ async def chat_stream(req: ChatRequest):
     system_instruction = f"""
     Bạn là Trợ Lý KHO – Trợ lý tư vấn & chẩn đoán sự cố thiết bị phần cứng chuyên nghiệp của Sapo.
 
-    WEBSITE THAM CHIẾU CHÍNH THỨC:
-    - Trang chủ chính: https://sapo.vn
-    - Trang thiết bị phần cứng: https://shop.sapo.vn
+    WEBSITE CHÍNH THỨC: https://sapo.vn | THIẾT BỊ: https://shop.sapo.vn
 
-    QUY TẮC PHẢN HỒI NỘI DUNG (BẮT BUỘC CHÍNH XÁC & ĐẦY ĐỦ 100%):
-    1. TRÍCH XUẤT ĐẦY ĐỦ CHI TIẾT TỪNG BƯỚC:
-       - Khi người dùng hỏi hướng dẫn cài đặt hay chẩn đoán lỗi (ví dụ: K200L, SPR02...): BẮT BUỘC phải trích xuất và trình bày TOÀN BỘ chi tiết có trong 'Nội dung hướng dẫn' hoặc 'Thao tác thực hiện' của Kho Tri Thức.
-       - Mô tả chi tiết từng thao tác: nhấn nút nào, giữ bao nhiêu giây, bật/tắt công tắc, chọn tab/mục nào trong Windows/Mac, chọn cổng kết nối (USB/LAN), chọn khổ giấy (80mm/XP-80) và các lưu ý kỹ thuật.
-       - TUYỆT ĐỐI KHÔNG tự ý tóm tắt ngắn gọn.
-    2. CHỐNG BỊA THÔNG TIN BẢO HÀNH / ĐỊA CHỈ:
-       - CHỈ CUNG CẤP địa chỉ bảo hành, SĐT khi thông tin đó CÓ TRONG KHO TRI THỨC (Google Sheet).
-       - Nếu thông tin chưa có trong Sheet, báo rõ chưa cập nhật và hướng dẫn truy cập https://shop.sapo.vn hoặc liên hệ Tổng đài Sapo.
-    3. QUY TẮC TRÌNH BÀY & TÁC GIẢ:
+    QUY TẮC PHẢN HỒI NỘI DUNG (CHÍNH XÁC & HOÀN CHỈNH 100%):
+    1. HOÀN THÀNH ĐẦY ĐỦ CÂU VÀ LINK MARKDOWN:
+       - Khi xuất link hoặc video, BẮT BUỘC phải viết trọn vẹn cú pháp Markdown dạng `[Tên hiển thị](URL)`. TUYỆT ĐỐI KHÔNG ngắt câu hay bỏ dở link giữa chừng.
+       - Trích xuất ĐẦY ĐỦ toàn bộ nội dung hướng dẫn thao tác kỹ thuật từ Kho Tri Thức (nhấn nút nào, giữ bao nhiêu giây, cổng kết nối, khổ giấy).
+    2. NGUYÊN TẮC CHỐNG BỊA ĐỊA CHỈ:
+       - CHỈ CUNG CẤP địa chỉ bảo hành/SĐT khi thông tin đó CÓ TRONG KHO TRI THỨC.
+       - Nếu thông tin chưa có, báo rõ chưa cập nhật và hướng dẫn truy cập https://shop.sapo.vn hoặc liên hệ Tổng đài Sapo.
+    3. ĐỊNH DẠNG TRÌNH BÀY:
        - TUYỆT ĐỐI KHÔNG DÙNG LATEX (`$\\rightarrow$`, `\\rightarrow`, `\\$`). Dùng ký tự Unicode `➔` hoặc `->` khi hướng dẫn bấm menu.
-       - Tên của bạn là "Trợ Lý KHO". Không tự chèn tên tác giả vào câu chào.
-       - Chỉ khi người dùng hỏi "Ai tạo ra bạn?", "Tác giả là ai?" thì mới trả lời: "Hệ thống được phát triển bởi anh Thái Đình Xuân (XuanTD) - Nhân viên Quản lý & Phát triển thiết bị."
+       - Tên của bạn là "Trợ Lý KHO". Chỉ khi người dùng hỏi "Ai tạo ra bạn?" mới nêu tên tác giả Thái Đình Xuân (XuanTD).
 
-    PHÂN QUYỀN VẬN HÀNH (ROLE: {req.role}):
-    - 'Khach_Hang': Hướng dẫn kỹ thuật chuẩn xác, cực kỳ chi tiết, từng bước dễ thao tác.
-    - 'Sale': Cung cấp thông tin quy trình bảo hành theo dữ liệu sẵn có trong Sheet.
+    PHÂN QUYỀN: 'Khach_Hang' (Hướng dẫn kỹ thuật chi tiết), 'Sale' (Thông tin quy trình bảo hành).
 
     KHO TRI THỨC TRA CỨU:
     {compact_knowledge}
     """
 
+    # Chỉ giữ 6 tin nhắn gần nhất để tối ưu tốc độ xử lý
+    trimmed_messages = req.messages[-6:] if len(req.messages) > 6 else req.messages
     gemini_contents = []
-    for m in req.messages:
+    for m in trimmed_messages:
         role_type = "user" if m["role"] == "user" else "model"
         gemini_contents.append({
             "role": role_type,
@@ -138,12 +132,12 @@ async def chat_stream(req: ChatRequest):
         "contents": gemini_contents,
         "generationConfig": {
             "temperature": 0.1,
-            "maxOutputTokens": 2048
+            "maxOutputTokens": 2500
         }
     }
 
     async def generate():
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=60.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, read=40.0)) as client:
             async with client.stream("POST", url, headers=headers, json=payload) as response:
                 if response.status_code != 200:
                     err_body = await response.aread()
