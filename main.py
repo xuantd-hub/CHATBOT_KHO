@@ -1,15 +1,15 @@
 import os
 import io
 import json
+import asyncio
 import pandas as pd
-import requests
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Engine", version="14.0")
+app = FastAPI(title="Trợ Lý KHO Engine", version="15.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,39 +28,41 @@ TABS = [
     "QUY_TRINH_LEO_THANG", "NHAN_SU_THIET_BI"
 ]
 
-def load_sheet_data():
+async def fetch_single_tab(client: httpx.AsyncClient, tab: str):
+    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
+    try:
+        res = await client.get(url, timeout=8.0)
+        if res.status_code == 200 and "text/csv" in res.headers.get("Content-Type", ""):
+            df = pd.read_csv(io.BytesIO(res.content)).fillna("")
+            records = df.to_dict(orient="records")
+            cleaned_records = []
+            for row in records:
+                cleaned_row = {k: str(v).strip() for k, v in row.items() if str(v).strip() != ""}
+                if cleaned_row:
+                    cleaned_records.append(cleaned_row)
+            return tab, cleaned_records
+    except Exception as e:
+        print(f"⚠️ Cảnh báo tab '{tab}': {e}")
+    return tab, []
+
+async def load_sheet_data_async():
     global RAM_CACHE
-    temp_cache = {}
-    for tab in TABS:
-        url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
-        try:
-            res = requests.get(url, timeout=10)
-            if res.status_code == 200 and "text/csv" in res.headers.get("Content-Type", ""):
-                df = pd.read_csv(io.BytesIO(res.content)).fillna("")
-                records = df.to_dict(orient="records")
-                cleaned_records = []
-                for row in records:
-                    cleaned_row = {k: str(v).strip() for k, v in row.items() if str(v).strip() != ""}
-                    if cleaned_row:
-                        cleaned_records.append(cleaned_row)
-                temp_cache[tab] = cleaned_records
-            else:
-                temp_cache[tab] = []
-        except Exception as e:
-            print(f"⚠️ Cảnh báo tab '{tab}': {e}")
-            temp_cache[tab] = []
-            
+    async with httpx.AsyncClient() as client:
+        tasks = [fetch_single_tab(client, tab) for tab in TABS]
+        results = await asyncio.gather(*tasks)
+        
+    temp_cache = {tab: records for tab, records in results}
     RAM_CACHE = temp_cache
-    print("✅ Đã nạp thành công dữ liệu Google Sheet vào RAM!")
+    print("✅ Đã nạp song song siêu tốc dữ liệu Google Sheet vào RAM!")
     return {"status": "success", "loaded_tabs": list(RAM_CACHE.keys())}
 
 @app.on_event("startup")
-def startup_event():
-    load_sheet_data()
+async def startup_event():
+    await load_sheet_data_async()
 
 @app.get("/reload")
-def reload_data():
-    return load_sheet_data()
+async def reload_data():
+    return await load_sheet_data_async()
 
 class ChatRequest(BaseModel):
     messages: list
@@ -100,17 +102,14 @@ async def chat_stream(req: ChatRequest):
     - Trang chủ chính: https://sapo.vn
     - Trang thiết bị phần cứng: https://shop.sapo.vn
 
-    QUY TẮC NGUYÊN TẮC QUAN TRỌNG VỀ DỮ LIỆU & NỘI DUNG (BẮT BUỘC CHÍNH XÁC & ĐẦY ĐỦ 100%):
-    1. KHÔNG TÓM TẮT NGẮN GỌN - TRÍCH XUẤT ĐẦY ĐỦ CHI TIẾT TỪNG BƯỚC:
-       - Khi người dùng hỏi hướng dẫn cài đặt, chẩn đoán lỗi hay quy trình kỹ thuật thiết bị (ví dụ: K200L, SPR02...): BẮT BUỘC phải trích xuất và trình bày TOÀN BỘ chi tiết có trong cột 'Nội dung hướng dẫn' hoặc 'Thao tác thực hiện' của Kho Tri Thức.
-       - TUYỆT ĐỐI KHÔNG tự ý tóm tắt ngắn gọn, không làm vắt tắt câu chữ.
-       - Phải mô tả đầy đủ các bước kỹ thuật: nhấn nút nào, giữ bao nhiêu giây, bật/tắt công tắc ra sao, chọn tab/mục nào trong Windows/Mac, chọn cổng kết nối (USB/LAN) nào, chọn khổ giấy bao nhiêu (80mm/XP-80) và các lưu ý xử lý sự cố đi kèm.
-       - Việc chỉ đưa ra vài dòng tóm tắt chung chung kèm đường link bị NGHÊM CẤM.
-
-    2. QUY TẮC CHỐNG BỊA THÔNG TIN BẢO HÀNH / ĐỊA CHỈ:
+    QUY TẮC PHẢN HỒI NỘI DUNG (BẮT BUỘC CHÍNH XÁC & ĐẦY ĐỦ 100%):
+    1. TRÍCH XUẤT ĐẦY ĐỦ CHI TIẾT TỪNG BƯỚC:
+       - Khi người dùng hỏi hướng dẫn cài đặt hay chẩn đoán lỗi (ví dụ: K200L, SPR02...): BẮT BUỘC phải trích xuất và trình bày TOÀN BỘ chi tiết có trong 'Nội dung hướng dẫn' hoặc 'Thao tác thực hiện' của Kho Tri Thức.
+       - Mô tả chi tiết từng thao tác: nhấn nút nào, giữ bao nhiêu giây, bật/tắt công tắc, chọn tab/mục nào trong Windows/Mac, chọn cổng kết nối (USB/LAN), chọn khổ giấy (80mm/XP-80) và các lưu ý kỹ thuật.
+       - TUYỆT ĐỐI KHÔNG tự ý tóm tắt ngắn gọn.
+    2. CHỐNG BỊA THÔNG TIN BẢO HÀNH / ĐỊA CHỈ:
        - CHỈ CUNG CẤP địa chỉ bảo hành, SĐT khi thông tin đó CÓ TRONG KHO TRI THỨC (Google Sheet).
        - Nếu thông tin chưa có trong Sheet, báo rõ chưa cập nhật và hướng dẫn truy cập https://shop.sapo.vn hoặc liên hệ Tổng đài Sapo.
-
     3. QUY TẮC TRÌNH BÀY & TÁC GIẢ:
        - TUYỆT ĐỐI KHÔNG DÙNG LATEX (`$\\rightarrow$`, `\\rightarrow`, `\\$`). Dùng ký tự Unicode `➔` hoặc `->` khi hướng dẫn bấm menu.
        - Tên của bạn là "Trợ Lý KHO". Không tự chèn tên tác giả vào câu chào.
@@ -120,7 +119,7 @@ async def chat_stream(req: ChatRequest):
     - 'Khach_Hang': Hướng dẫn kỹ thuật chuẩn xác, cực kỳ chi tiết, từng bước dễ thao tác.
     - 'Sale': Cung cấp thông tin quy trình bảo hành theo dữ liệu sẵn có trong Sheet.
 
-    KHO TRI THỨC TRA CỨU (DỮ LIỆU THỰC TẾ):
+    KHO TRI THỨC TRA CỨU:
     {compact_knowledge}
     """
 
