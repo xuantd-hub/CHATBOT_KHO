@@ -21,7 +21,7 @@ app.add_middleware(
 
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6Lv4_HzCEz6iLuRChDrw-NGLOO28NYuM37uBe8caeYIZg").strip()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6KL69gMjPEhKZolLylLFY7PV70s9THj_I-CPACq59JBDA").strip()
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
 # Biến lưu tên Model Groq hoạt động thực tế
