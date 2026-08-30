@@ -22,37 +22,25 @@
         .markdown-body li { margin-bottom: 0.25rem; }
         .markdown-body img { max-width: 100%; border-radius: 0.75rem; margin: 0.5rem 0; border: 1px solid #e2e8f0; }
         
+        /* Chỉnh CSS Bảng để nếu AI xuất bảng sẽ hiển thị rất đẹp */
+        .markdown-body table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; font-size: 0.85rem; }
+        .markdown-body th, .markdown-body td { border: 1px solid #cbd5e1; padding: 0.6rem; text-align: left; }
+        .markdown-body th { background-color: #f1f5f9; font-weight: 600; color: #1e293b; }
+
         .dot-flashing {
             position: relative;
-            width: 6px;
-            height: 6px;
-            border-radius: 5px;
-            background-color: #6366f1;
-            color: #6366f1;
+            width: 6px; height: 6px; border-radius: 5px;
+            background-color: #6366f1; color: #6366f1;
             animation: dot-flashing 0.8s infinite linear alternate;
             animation-delay: 0.4s;
         }
         .dot-flashing::before, .dot-flashing::after {
-            content: "";
-            display: inline-block;
-            position: absolute;
-            top: 0;
-            width: 6px;
-            height: 6px;
-            border-radius: 5px;
-            background-color: #6366f1;
-            color: #6366f1;
+            content: ""; display: inline-block; position: absolute; top: 0;
+            width: 6px; height: 6px; border-radius: 5px;
+            background-color: #6366f1; color: #6366f1;
         }
-        .dot-flashing::before {
-            left: -10px;
-            animation: dot-flashing 0.8s infinite alternate;
-            animation-delay: 0s;
-        }
-        .dot-flashing::after {
-            left: 10px;
-            animation: dot-flashing 0.8s infinite alternate;
-            animation-delay: 0.8s;
-        }
+        .dot-flashing::before { left: -10px; animation: dot-flashing 0.8s infinite alternate; animation-delay: 0s; }
+        .dot-flashing::after { left: 10px; animation: dot-flashing 0.8s infinite alternate; animation-delay: 0.8s; }
         @keyframes dot-flashing {
             0% { background-color: #6366f1; }
             50%, 100% { background-color: #e0e7ff; }
@@ -69,7 +57,7 @@
             </div>
             <div>
                 <h1 class="font-bold text-base leading-tight flex items-center gap-2">
-                    Trợ Lý KHO <span class="text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30">v3.6 Active</span>
+                    Trợ Lý KHO <span class="text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30">Pro Active</span>
                 </h1>
                 <p class="text-xs text-indigo-300/80 font-normal">Hỗ trợ chẩn đoán sự cố & kỹ thuật Sapo</p>
             </div>
@@ -102,7 +90,7 @@
     <!-- TRA NHANH -->
     <div class="bg-white border-b border-slate-200/80 px-5 py-2.5 flex items-center gap-2 overflow-x-auto text-xs whitespace-nowrap scrollbar-none shadow-2xs">
         <span class="text-slate-400 font-semibold flex items-center gap-1.5 mr-1"><i class="fa-solid fa-bolt text-amber-500"></i> Tra nhanh:</span>
-        <button onclick="quickAsk('Máy in K200L không in được')" class="bg-slate-100/80 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3.5 py-1.5 rounded-xl border border-slate-200/60 transition-all font-medium">🖨️ Máy K200L không in</button>
+        <button onclick="quickAsk('Máy in K200L không in được')" class="bg-slate-100/80 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3.5 py-1.5 rounded-xl border border-slate-200/60 transition-all font-medium">🖨️ K200L không in</button>
         <button onclick="quickAsk('Cách xem tem nhãn tra mã máy')" class="bg-slate-100/80 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3.5 py-1.5 rounded-xl border border-slate-200/60 transition-all font-medium">🏷️ Cách xem mã máy</button>
         <button onclick="quickAsk('Máy in bị kẹt dao cắt')" class="bg-slate-100/80 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3.5 py-1.5 rounded-xl border border-slate-200/60 transition-all font-medium">✂️ Kẹt dao cắt</button>
         <button onclick="quickAsk('Cài Driver máy in K200L')" class="bg-slate-100/80 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3.5 py-1.5 rounded-xl border border-slate-200/60 transition-all font-medium">📥 Cài Driver K200L</button>
@@ -121,7 +109,7 @@
                 <p class="text-slate-600">Em hỗ trợ chẩn đoán sự cố, hướng dẫn cài đặt máy in hóa đơn, máy quét mã vạch, máy POS và khay đựng tiền Sapo.</p>
                 <div class="text-xs text-slate-500 bg-slate-50 p-3 rounded-2xl border border-slate-100 flex items-center gap-2 mt-2">
                     <i class="fa-solid fa-circle-info text-indigo-500 text-sm"></i>
-                    <span>Dữ liệu hướng dẫn kỹ thuật được kết nối trực tiếp từ Google Sheet kho Sapo. Hỗ trợ 24/7.</span>
+                    <span>Dữ liệu hướng dẫn kỹ thuật được đồng bộ 100% từ Google Sheet kho Sapo. Hỗ trợ 24/7.</span>
                 </div>
             </div>
         </div>
@@ -135,8 +123,7 @@
                 id="user-input" 
                 placeholder="Nhập triệu chứng lỗi, tên máy hoặc câu hỏi kỹ thuật..." 
                 class="flex-1 bg-slate-100/80 border border-slate-300/80 focus:border-indigo-600 focus:bg-white focus:outline-none px-4 py-3 rounded-2xl text-sm transition-all shadow-inner"
-                required
-                autocomplete="off"
+                required autocomplete="off"
             />
             <button 
                 type="submit" 
@@ -162,21 +149,11 @@
             <div class="space-y-3">
                 <div>
                     <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">Email Sapo (*)</label>
-                    <input 
-                        type="email" 
-                        id="sale-email-input" 
-                        placeholder="tennhanvien@sapo.vn" 
-                        class="w-full text-sm bg-slate-100 border border-slate-300 focus:border-indigo-500 focus:bg-white focus:outline-none px-3.5 py-2.5 rounded-xl"
-                    />
+                    <input type="email" id="sale-email-input" placeholder="tennhanvien@sapo.vn" class="w-full text-sm bg-slate-100 border border-slate-300 focus:border-indigo-500 focus:bg-white focus:outline-none px-3.5 py-2.5 rounded-xl" />
                 </div>
                 <div>
                     <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">Mật khẩu Sale (*)</label>
-                    <input 
-                        type="password" 
-                        id="sale-pin-input" 
-                        placeholder="Mật khẩu nội bộ" 
-                        class="w-full text-sm bg-slate-100 border border-slate-300 focus:border-indigo-500 focus:bg-white focus:outline-none px-3.5 py-2.5 rounded-xl"
-                    />
+                    <input type="password" id="sale-pin-input" placeholder="Mật khẩu nội bộ" class="w-full text-sm bg-slate-100 border border-slate-300 focus:border-indigo-500 focus:bg-white focus:outline-none px-3.5 py-2.5 rounded-xl" />
                 </div>
             </div>
 
@@ -194,57 +171,39 @@
         let currentRole = "Khach_Hang";
         let chatHistory = [];
 
-        // Khôi phục vai trò Sale tự động nếu đã xác thực trước đó trên thiết bị này
         window.addEventListener("DOMContentLoaded", () => {
             const savedRole = localStorage.getItem("sapo_user_role");
-            if (savedRole === "Sale") {
-                setRole("Sale");
-            }
+            if (savedRole === "Sale") setRole("Sale");
         });
 
         const renderer = new marked.Renderer();
         renderer.link = function(href, title, text) {
             const linkUrl = (typeof href === 'object') ? href.href : href;
             const linkText = (typeof href === 'object') ? href.text : text;
-            const linkTitle = (typeof href === 'object') ? href.title : title;
-            const titleAttr = linkTitle ? `title="${linkTitle}"` : '';
-            return `<a href="${linkUrl}" ${titleAttr} target="_blank" rel="noopener noreferrer" class="text-indigo-600 underline font-semibold hover:text-indigo-800 transition-colors inline-flex items-center gap-1">${linkText} <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i></a>`;
+            return `<a href="${linkUrl}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 underline font-semibold hover:text-indigo-800 transition-colors inline-flex items-center gap-1">${linkText} <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i></a>`;
         };
         marked.setOptions({ renderer: renderer });
 
         function getCurrentTimeString() {
-            const now = new Date();
-            return now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            return new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         }
 
-        const FIVE_MINUTES = 5 * 60 * 1000;
-        
-        async function autoReloadSheetData() {
+        setInterval(async () => {
             try {
                 const res = await fetch(`${BACKEND_URL}/reload`);
-                if (res.ok) {
-                    const timeStr = getCurrentTimeString();
-                    document.getElementById("last-sync-time").innerText = `Đồng bộ: ${timeStr}`;
-                }
-            } catch (err) {
-                console.log("Không thể kết nối Backend để tự động đồng bộ.");
-            }
-        }
-
-        autoReloadSheetData();
-        setInterval(autoReloadSheetData, FIVE_MINUTES);
+                if (res.ok) document.getElementById("last-sync-time").innerText = `Đồng bộ: ${getCurrentTimeString()}`;
+            } catch (err) {}
+        }, 5 * 60 * 1000);
 
         async function manualReloadSheetData() {
             const icon = document.getElementById("icon-reload");
             icon.classList.add("fa-spin");
             try {
-                const res = await fetch(`${BACKEND_URL}/reload`);
-                const data = await res.json();
-                const timeStr = getCurrentTimeString();
-                document.getElementById("last-sync-time").innerText = `Thủ công: ${timeStr}`;
-                alert("✅ Đã cập nhật dữ liệu mới nhất từ Google Sheets thành công!");
+                await fetch(`${BACKEND_URL}/reload`);
+                document.getElementById("last-sync-time").innerText = `Thủ công: ${getCurrentTimeString()}`;
+                alert("✅ Đã nạp thành công 100% dữ liệu mới từ Sheet!");
             } catch (err) {
-                alert("❌ Không thể kết nối tới Server Backend!");
+                alert("❌ Lỗi kết nối Server Backend!");
             } finally {
                 icon.classList.remove("fa-spin");
             }
@@ -284,36 +243,25 @@
             const email = document.getElementById("sale-email-input").value.trim();
             const pin = document.getElementById("sale-pin-input").value.trim();
 
-            if (!email || !pin) {
-                alert("Vui lòng nhập đầy đủ Email và Mật khẩu!");
-                return;
-            }
-
-            if (!email.toLowerCase().endsWith("@sapo.vn")) {
-                alert("Email bắt buộc phải có đuôi @sapo.vn!");
-                return;
-            }
+            if (!email || !pin) return alert("Vui lòng nhập đầy đủ Email và Mật khẩu!");
+            if (!email.toLowerCase().endsWith("@sapo.vn")) return alert("Email bắt buộc đuôi @sapo.vn!");
 
             const btnSubmit = document.getElementById("btn-submit-sale");
             btnSubmit.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`;
 
             try {
                 const res = await fetch(`${BACKEND_URL}/verify-sale`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ email: email, passcode: pin })
                 });
-
                 const data = await res.json();
                 if (data.success) {
-                    setRole('Sale');
-                    closeSaleModal();
-                    alert("✅ " + data.message);
+                    setRole('Sale'); closeSaleModal(); alert("✅ " + data.message);
                 } else {
                     alert("❌ " + data.message);
                 }
             } catch (err) {
-                alert("❌ Lỗi kết nối máy chủ xác thực!");
+                alert("❌ Lỗi máy chủ xác thực!");
             } finally {
                 btnSubmit.innerHTML = `<span>Xác nhận</span>`;
             }
@@ -331,98 +279,62 @@
             if (!text) return;
 
             const chatBox = document.getElementById("chat-box");
-
-            const userMsgHtml = `
+            chatBox.insertAdjacentHTML("beforeend", `
                 <div class="flex items-start gap-3 justify-end">
-                    <div class="bg-indigo-700 text-white p-4 rounded-3xl rounded-tr-xs shadow-sm max-w-xl text-sm leading-relaxed">
-                        ${escapeHtml(text)}
-                    </div>
-                    <div class="w-9 h-9 rounded-2xl bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs flex-shrink-0">
-                        Bạn
-                    </div>
+                    <div class="bg-indigo-700 text-white p-4 rounded-3xl rounded-tr-xs shadow-sm max-w-xl text-sm leading-relaxed">${escapeHtml(text)}</div>
+                    <div class="w-9 h-9 rounded-2xl bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs flex-shrink-0">Bạn</div>
                 </div>
-            `;
-            chatBox.insertAdjacentHTML("beforeend", userMsgHtml);
-            inputEl.value = "";
-            chatBox.scrollTop = chatBox.scrollHeight;
-
+            `);
+            inputEl.value = ""; chatBox.scrollTop = chatBox.scrollHeight;
             chatHistory.push({ role: "user", text: text });
 
             const aiMsgId = "ai-msg-" + Date.now();
-            const aiMsgHtml = `
+            chatBox.insertAdjacentHTML("beforeend", `
                 <div class="flex items-start gap-3.5">
-                    <div class="w-9 h-9 rounded-2xl bg-amber-500 text-indigo-950 flex items-center justify-center font-black text-xs flex-shrink-0 shadow-sm border border-amber-300">
-                        KHO
-                    </div>
-                    <div class="bg-white p-4 md:p-5 rounded-3xl rounded-tl-xs border border-slate-200/80 shadow-sm max-w-2xl text-slate-800 text-sm leading-relaxed space-y-2 relative group">
+                    <div class="w-9 h-9 rounded-2xl bg-amber-500 text-indigo-950 flex items-center justify-center font-black text-xs flex-shrink-0 shadow-sm border border-amber-300">KHO</div>
+                    <div class="bg-white p-4 md:p-5 rounded-3xl rounded-tl-xs border border-slate-200/80 shadow-sm max-w-2xl text-slate-800 text-sm leading-relaxed space-y-2 relative group w-full">
                         <div id="${aiMsgId}" class="markdown-body">
                             <div class="flex items-center gap-3 py-1 text-slate-400 font-medium text-xs">
-                                <div class="dot-flashing ml-2"></div>
-                                <span class="ml-3">Đang tra cứu kho tri thức Sapo...</span>
+                                <div class="dot-flashing ml-2"></div><span class="ml-3">Đang phân tích 100% kho tri thức...</span>
                             </div>
                         </div>
-                        <button onclick="copyToClipboard('${aiMsgId}')" class="opacity-0 group-hover:opacity-100 transition-opacity absolute top-3 right-3 bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 text-xs px-2.5 py-1 rounded-lg border border-slate-200 flex items-center gap-1 shadow-2xs">
-                            <i class="fa-regular fa-copy"></i> Copy
-                        </button>
+                        <button onclick="copyToClipboard('${aiMsgId}')" class="opacity-0 group-hover:opacity-100 transition-opacity absolute top-3 right-3 bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 text-xs px-2.5 py-1 rounded-lg border border-slate-200 flex items-center gap-1 shadow-2xs"><i class="fa-regular fa-copy"></i> Copy</button>
                     </div>
                 </div>
-            `;
-            chatBox.insertAdjacentHTML("beforeend", aiMsgHtml);
+            `);
             chatBox.scrollTop = chatBox.scrollHeight;
 
             try {
                 const response = await fetch(`${BACKEND_URL}/chat`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ messages: chatHistory, role: currentRole })
                 });
 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder("utf-8");
                 const aiEl = document.getElementById(aiMsgId);
-
-                let fullText = "";
-                let isFirstChunk = true;
+                let fullText = "", isFirstChunk = true;
 
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
-
-                    const chunk = decoder.decode(value, { stream: true });
-                    fullText += chunk;
-
-                    if (isFirstChunk && fullText.trim().length > 0) {
-                        aiEl.innerHTML = "";
-                        isFirstChunk = false;
-                    }
-
-                    let cleanedText = fullText
-                        .replace(/\\\$/g, '')
-                        .replace(/\\rightarrow/g, '➔')
-                        .replace(/\$\\rightarrow\$/g, '➔')
-                        .replace(/\$/g, '');
-
+                    fullText += decoder.decode(value, { stream: true });
+                    if (isFirstChunk && fullText.trim().length > 0) { aiEl.innerHTML = ""; isFirstChunk = false; }
+                    
+                    let cleanedText = fullText.replace(/\\\$/g, '').replace(/\\rightarrow/g, '➔').replace(/\$\\rightarrow\$/g, '➔').replace(/\$/g, '');
                     aiEl.innerHTML = marked.parse(cleanedText);
                     chatBox.scrollTop = chatBox.scrollHeight;
                 }
-
                 chatHistory.push({ role: "model", text: fullText });
-
             } catch (err) {
                 document.getElementById(aiMsgId).innerHTML = `<span class="text-red-500 font-semibold">❌ Lỗi kết nối Server Backend!</span>`;
             }
         }
 
         function copyToClipboard(elementId) {
-            const text = document.getElementById(elementId).innerText;
-            navigator.clipboard.writeText(text).then(() => {
-                alert("📋 Đã copy câu trả lời!");
-            });
+            navigator.clipboard.writeText(document.getElementById(elementId).innerText).then(() => alert("📋 Đã copy câu trả lời!"));
         }
-
-        function escapeHtml(text) {
-            return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        }
+        function escapeHtml(text) { return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
     </script>
 </body>
 </html>
