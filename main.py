@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Groq Master Engine", version="118.0")
+app = FastAPI(title="Trợ Lý KHO Groq Lightning Engine", version="120.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "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").strip()
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
 RAM_CACHE = {}
@@ -80,9 +80,8 @@ def health_check():
     total_items = sum(len(v) for v in RAM_CACHE.values())
     return {
         "status": "healthy",
-        "service": "Trợ Lý KHO Groq Master Engine",
-        "total_records": total_items,
-        "groq_active": bool(GROQ_API_KEY)
+        "service": "Trợ Lý KHO Groq Lightning Engine",
+        "total_records": total_items
     }
 
 @app.get("/reload")
@@ -108,7 +107,6 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 def get_smart_knowledge_context(query: str, role: str) -> str:
-    """ Tìm kiếm thông minh gọn nhẹ để Groq đọc siêu tốc """
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     words = [w.lower() for w in query.split() if len(w) > 1]
     
@@ -138,10 +136,9 @@ def build_system_prompt(knowledge_context: str, role: str) -> str:
     Bạn là Trợ Lý KHO Sapo – Chuyên gia tư vấn & kỹ thuật phần cứng Sapo. Thông minh, nhạy bén và chuyên nghiệp.
 
     NHIỆM VỤ:
-    1. Đọc Kho Tri Thức bên dưới để trả lời câu hỏi. Bạn hãy tự suy luận thông minh khi câu hỏi của khách dùng từ ngữ đa dạng (Ví dụ: "khổ giấy/tem" -> hiểu là "kích thước tem in", "lỗi kêu/báo đỏ" -> hiểu là "kẹt giấy/hết mực").
-    2. Hướng dẫn chi tiết từng bước, trình bày rành mạch bằng Markdown (dùng gạch đầu dòng và in đậm).
-    3. Trích xuất ĐẦY ĐỦ link Driver/Video có trong dữ liệu bằng cú pháp `[Tên hiển thị](URL)`.
-    4. Xưng "Trợ Lý KHO". Dùng `➔` chỉ hướng.
+    1. Đọc Kho Tri Thức bên dưới để trả lời câu hỏi của khách hàng một cách thông minh, rành mạch bằng Markdown (in đậm từ khóa, dùng gạch đầu dòng).
+    2. Trích xuất ĐẦY ĐỦ link Driver/Video có trong dữ liệu bằng cú pháp `[Tên hiển thị](URL)`.
+    3. Xưng "Trợ Lý KHO". Dùng `➔` chỉ hướng.
 
     BẢO MẬT (ROLE: {role}):
     - 'Khach_Hang': Không tiết lộ thông tin bảo hành nội bộ Tab 4.
@@ -152,7 +149,7 @@ def build_system_prompt(knowledge_context: str, role: str) -> str:
     """
 
 # ==========================================
-# 1. CỔNG WEB VERCEL (/chat) - GROQ STREAM 0.2S
+# 1. CỔNG WEB VERCEL (/chat) - GROQ LIGHTNING STREAM
 # ==========================================
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -161,11 +158,17 @@ async def chat_stream(req: ChatRequest):
     system_instruction = build_system_prompt(focused_knowledge, req.role)
 
     async def generate_groq():
-        yield ""  # Mở luồng ngay lập tức để Web không bị xoay tròn
+        yield ""  # Mở luồng ngay lập tức
         
-        # Thử lần lượt các mô hình Groq khả dụng
-        groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-8b-8192"]
-        for g_model in groq_models:
+        # Danh sách mô hình Groq quét tự động từ nhẹ đến nặng
+        safe_models = [
+            "llama-3.1-8b-instant",
+            "llama3-8b-8192",
+            "llama3-70b-8192",
+            "llama-3.3-70b-versatile"
+        ]
+
+        for g_model in safe_models:
             try:
                 url = "https://api.groq.com/openai/v1/chat/completions"
                 headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
@@ -195,12 +198,12 @@ async def chat_stream(req: ChatRequest):
                         return
             except Exception: continue
 
-        yield "❌ Không thể kết nối Groq API. Vui lòng kiểm tra lại Key."
+        yield "❌ Lỗi kết nối Groq Lightning Engine. Vui lòng kiểm tra lại Key."
 
     return StreamingResponse(generate_groq(), media_type="text/plain", headers={"Cache-Control": "no-cache"})
 
 # ==========================================
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - GROQ FAST 0.3S
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat)
 # ==========================================
 def format_for_gchat(text: str) -> str:
     text = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text)
@@ -210,8 +213,14 @@ async def call_groq_fast_gchat(user_query: str) -> str:
     focused_knowledge = get_smart_knowledge_context(user_query, role="Sale")
     system_instruction = build_system_prompt(focused_knowledge, role="Sale")
 
-    groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-8b-8192"]
-    for g_model in groq_models:
+    safe_models = [
+        "llama-3.1-8b-instant",
+        "llama3-8b-8192",
+        "llama3-70b-8192",
+        "llama-3.3-70b-versatile"
+    ]
+
+    for g_model in safe_models:
         try:
             url = "https://api.groq.com/openai/v1/chat/completions"
             headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
@@ -224,14 +233,14 @@ async def call_groq_fast_gchat(user_query: str) -> str:
                 "temperature": 0.2,
                 "max_tokens": 800
             }
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=3.2)
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=3.0)
             if res.status_code == 200:
                 data = res.json()
                 raw_text = data["choices"][0]["message"]["content"]
                 return format_for_gchat(raw_text)
         except Exception: continue
 
-    return "❌ Hệ thống Groq đang bận, anh/chị thử lại câu hỏi ngắn hơn nhé."
+    return "❌ Hệ thống Groq đang bận, vui lòng thử lại."
 
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
