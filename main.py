@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Groq Lightning Engine", version="120.0")
+app = FastAPI(title="Trợ Lý KHO Bulletproof Engine", version="121.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -80,7 +80,7 @@ def health_check():
     total_items = sum(len(v) for v in RAM_CACHE.values())
     return {
         "status": "healthy",
-        "service": "Trợ Lý KHO Groq Lightning Engine",
+        "service": "Trợ Lý KHO Bulletproof Engine",
         "total_records": total_items
     }
 
@@ -106,7 +106,7 @@ class ChatRequest(BaseModel):
     messages: list
     role: str = "Khach_Hang"
 
-def get_smart_knowledge_context(query: str, role: str) -> str:
+def get_smart_knowledge_context(query: str, role: str) -> tuple[str, list]:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     words = [w.lower() for w in query.split() if len(w) > 1]
     
@@ -129,46 +129,53 @@ def get_smart_knowledge_context(query: str, role: str) -> str:
         knowledge_text += f"\n--- [{tab}] ---\n"
         for key, value in row.items():
             knowledge_text += f"{key}: {value}\n"
-    return knowledge_text
+    return knowledge_text, top_matches
 
-def build_system_prompt(knowledge_context: str, role: str) -> str:
-    return f"""
-    Bạn là Trợ Lý KHO Sapo – Chuyên gia tư vấn & kỹ thuật phần cứng Sapo. Thông minh, nhạy bén và chuyên nghiệp.
+def format_local_smart_response(matches: list) -> str:
+    """ Bộ định dạng thông minh trực tiếp từ Sheet, đảm bảo không bao giờ lỗi """
+    response = "🤖 **Trợ Lý KHO Sapo** xin gửi thông tin kỹ thuật:\n\n"
+    for _, tab, row in matches[:3]:
+        dev_name = row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", "Thiết bị Sapo"))
+        guide = row.get("Noi_Dung_Huong_Dan", row.get("Cach_Khac_Phuc", row.get("Mo_Ta_Loi", row.get("Mo_Ta", ""))))
+        driver = row.get("Link_Driver", row.get("Link_Video", ""))
 
-    NHIỆM VỤ:
-    1. Đọc Kho Tri Thức bên dưới để trả lời câu hỏi của khách hàng một cách thông minh, rành mạch bằng Markdown (in đậm từ khóa, dùng gạch đầu dòng).
-    2. Trích xuất ĐẦY ĐỦ link Driver/Video có trong dữ liệu bằng cú pháp `[Tên hiển thị](URL)`.
-    3. Xưng "Trợ Lý KHO". Dùng `➔` chỉ hướng.
-
-    BẢO MẬT (ROLE: {role}):
-    - 'Khach_Hang': Không tiết lộ thông tin bảo hành nội bộ Tab 4.
-    - 'Sale': Giải đáp đầy đủ thông tin bảo hành Tab 4.
-
-    KHO TRI THỨC KĨ THUẬT:
-    {knowledge_context}
-    """
+        response += f"🔹 **{dev_name}**\n"
+        if guide:
+            response += f"• **Hướng dẫn / Xử lý:** {guide}\n"
+        if driver:
+            response += f"• 🔗 **Driver / Video:** [{dev_name}]({driver})\n"
+        response += "\n"
+    response += "Nếu cần hỗ trợ thêm về thiết bị nào, anh/chị cứ nhắn cho Trợ Lý KHO biết nhé!"
+    return response.strip()
 
 # ==========================================
-# 1. CỔNG WEB VERCEL (/chat) - GROQ LIGHTNING STREAM
+# 1. CỔNG WEB VERCEL (/chat)
 # ==========================================
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
-    focused_knowledge = get_smart_knowledge_context(latest_msg, req.role)
-    system_instruction = build_system_prompt(focused_knowledge, req.role)
+    
+    # Xử lý nhanh câu chào
+    clean_q = re.sub(r'[^\w\s]', '', latest_msg.lower()).strip()
+    quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chào bạn nhé"]
+    if clean_q in quick_greetings:
+        async def greeting_gen():
+            yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị, cài đặt máy in hay xử lý lỗi gì ạ?"
+        return StreamingResponse(greeting_gen(), media_type="text/plain")
 
-    async def generate_groq():
+    focused_knowledge, raw_matches = get_smart_knowledge_context(latest_msg, req.role)
+    system_instruction = f"""
+    Bạn là Trợ Lý KHO Sapo – Chuyên gia tư vấn & kỹ thuật phần cứng Sapo. Thông minh và chuyên nghiệp.
+    NHIỆM VỤ: Đọc dữ liệu dưới đây để trả lời câu hỏi bằng Markdown. Đính kèm link Driver đầy đủ.
+    {focused_knowledge}
+    """
+
+    async def generate():
         yield ""  # Mở luồng ngay lập tức
         
-        # Danh sách mô hình Groq quét tự động từ nhẹ đến nặng
-        safe_models = [
-            "llama-3.1-8b-instant",
-            "llama3-8b-8192",
-            "llama3-70b-8192",
-            "llama-3.3-70b-versatile"
-        ]
-
-        for g_model in safe_models:
+        # Thử gọi Groq trước
+        groq_models = ["llama-3.1-8b-instant", "llama3-8b-8192", "llama3-70b-8192"]
+        for g_model in groq_models:
             try:
                 url = "https://api.groq.com/openai/v1/chat/completions"
                 headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
@@ -179,7 +186,7 @@ async def chat_stream(req: ChatRequest):
                         {"role": "user", "content": latest_msg}
                     ],
                     "temperature": 0.2,
-                    "max_tokens": 1000,
+                    "max_tokens": 800,
                     "stream": True
                 }
                 async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload) as res:
@@ -198,9 +205,10 @@ async def chat_stream(req: ChatRequest):
                         return
             except Exception: continue
 
-        yield "❌ Lỗi kết nối Groq Lightning Engine. Vui lòng kiểm tra lại Key."
+        # DỰ PHÒNG AN TOÀN TUYỆT ĐỐI: Nếu Groq lỗi/hết quota, tự format dữ liệu Sheet trả về ngay trong 0.01 giây
+        yield format_local_smart_response(raw_matches)
 
-    return StreamingResponse(generate_groq(), media_type="text/plain", headers={"Cache-Control": "no-cache"})
+    return StreamingResponse(generate(), media_type="text/plain", headers={"Cache-Control": "no-cache"})
 
 # ==========================================
 # 2. CỔNG GOOGLE CHAT BOT (/google-chat)
@@ -208,39 +216,6 @@ async def chat_stream(req: ChatRequest):
 def format_for_gchat(text: str) -> str:
     text = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text)
     return text.replace(r'\rightarrow', '➔').replace(r'$\rightarrow$', '➔').replace('$', '').strip()
-
-async def call_groq_fast_gchat(user_query: str) -> str:
-    focused_knowledge = get_smart_knowledge_context(user_query, role="Sale")
-    system_instruction = build_system_prompt(focused_knowledge, role="Sale")
-
-    safe_models = [
-        "llama-3.1-8b-instant",
-        "llama3-8b-8192",
-        "llama3-70b-8192",
-        "llama-3.3-70b-versatile"
-    ]
-
-    for g_model in safe_models:
-        try:
-            url = "https://api.groq.com/openai/v1/chat/completions"
-            headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-            payload = {
-                "model": g_model,
-                "messages": [
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": user_query}
-                ],
-                "temperature": 0.2,
-                "max_tokens": 800
-            }
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=3.0)
-            if res.status_code == 200:
-                data = res.json()
-                raw_text = data["choices"][0]["message"]["content"]
-                return format_for_gchat(raw_text)
-        except Exception: continue
-
-    return "❌ Hệ thống Groq đang bận, vui lòng thử lại."
 
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -254,17 +229,43 @@ async def google_chat_webhook(request: Request):
         if event_type == "MESSAGE":
             user_text = event.get("message", {}).get("text", "")
             cleaned_message = re.sub(r'<.*?>', '', user_text).replace("@Trợ Lý KHO Sapo", "").strip()
+            clean_q = re.sub(r'[^\w\s]', '', cleaned_message.lower()).strip()
 
             quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chào bạn nhé"]
-            if not cleaned_message or cleaned_message.lower() in quick_greetings:
+            if not clean_q or clean_q in quick_greetings:
                 return JSONResponse(content={
                     "text": "👋 Xin chào! Em là *Trợ Lý KHO Sapo*. Anh/chị cần hỗ trợ tra cứu thông số máy in, cài đặt driver hay khắc phục lỗi gì ạ?"
                 })
 
-            ai_reply = await call_groq_fast_gchat(cleaned_message)
-            return JSONResponse(content={"text": ai_reply})
+            focused_knowledge, raw_matches = get_smart_knowledge_context(cleaned_message, role="Sale")
+            
+            # Thử Groq cho Google Chat
+            groq_models = ["llama-3.1-8b-instant", "llama3-8b-8192", "llama3-70b-8192"]
+            for g_model in groq_models:
+                try:
+                    url = "https://api.groq.com/openai/v1/chat/completions"
+                    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+                    payload = {
+                        "model": g_model,
+                        "messages": [
+                            {"role": "system", "content": f"Bạn là Trợ Lý KHO Sapo trên Google Chat. Trả lời ngắn gọn, kèm link Markdown.\n{focused_knowledge}"},
+                            {"role": "user", "content": cleaned_message}
+                        ],
+                        "temperature": 0.2,
+                        "max_tokens": 600
+                    }
+                    res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=2.8)
+                    if res.status_code == 200:
+                        data = res.json()
+                        raw_text = data["choices"][0]["message"]["content"]
+                        return JSONResponse(content={"text": format_for_gchat(raw_text)})
+                except Exception: continue
+
+            # DỰ PHÒNG SIÊU TỐC CHO GOOGLE CHAT: Phản hồi lập tức từ dữ liệu Sheet
+            fallback_reply = format_local_smart_response(raw_matches)
+            return JSONResponse(content={"text": format_for_gchat(fallback_reply)})
 
     except Exception as e:
-        return JSONResponse(content={"text": f"❌ Lỗi xử lý Bot: {str(e)}"})
+        return JSONResponse(content={"text": f"❌ Lỗi Bot: {str(e)}"})
 
     return JSONResponse(content={"text": "OK"})
