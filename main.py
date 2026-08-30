@@ -1,7 +1,7 @@
 import os
 import io
-import asyncio
 import json
+import asyncio
 import pandas as pd
 import httpx
 from fastapi import FastAPI
@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Master Final", version="100.3")
+app = FastAPI(title="Trợ Lý KHO Enterprise Cloud Engine", version="100.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,7 +18,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-SHEET_ID = "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag"
+SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
@@ -38,7 +38,11 @@ HTTP_CLIENT: httpx.AsyncClient = None
 @app.on_event("startup")
 async def startup_event():
     global HTTP_CLIENT
-    HTTP_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(20.0, read=40.0))
+    # Tối ưu hóa Connection Pool kết nối trực tiếp Google AI Backbone
+    HTTP_CLIENT = httpx.AsyncClient(
+        timeout=httpx.Timeout(20.0, read=40.0),
+        limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
+    )
     await load_sheet_data_async()
 
 @app.on_event("shutdown")
@@ -54,12 +58,13 @@ async def fetch_single_tab_raw(tab: str):
             df = pd.read_csv(io.BytesIO(res.content)).fillna("")
             records = []
             for _, row in df.iterrows():
+                # Giữ nguyên 100% các dòng, các cột và dấu xuống dòng trong ô Sheet
                 row_data = {str(k): str(v).strip() for k, v in row.items() if str(v).strip()}
                 if row_data:
                     records.append(row_data)
             return tab, records
     except Exception as e:
-        print(f"⚠️ Lỗi tab '{tab}': {e}")
+        print(f"⚠️ Cảnh báo nạp tab '{tab}': {e}")
     return tab, []
 
 async def load_sheet_data_async():
@@ -67,8 +72,12 @@ async def load_sheet_data_async():
     tasks = [fetch_single_tab_raw(tab) for tab in ALL_TABS]
     results = await asyncio.gather(*tasks)
     RAM_CACHE = {tab: records for tab, records in results}
-    print("✅ Đã nạp 100% dữ liệu thô, giữ nguyên chi tiết!")
+    print("✅ [CLOUD RUN] Đã nạp thành công 100% dữ liệu thô vào RAM!")
     return {"status": "success"}
+
+@app.get("/")
+def health_check():
+    return {"status": "healthy", "service": "Trợ Lý KHO Engine", "region": "asia-southeast1"}
 
 @app.get("/reload")
 async def reload_data():
@@ -107,7 +116,6 @@ def get_smart_focused_knowledge(query: str, role: str) -> str:
     for tab in accessible_tabs:
         for row in RAM_CACHE.get(tab, []):
             row_text = " ".join(str(v).lower() for v in row.values())
-            
             score = 0
             for w in words:
                 if w in row_text:
@@ -124,7 +132,7 @@ def get_smart_focused_knowledge(query: str, role: str) -> str:
     top_matches = scored_rows[:8]
 
     if not top_matches:
-        return "Không tìm thấy dữ liệu khớp lệnh. Dựa vào kiến thức sẵn có, hãy tư vấn nhẹ nhàng."
+        return "Không tìm thấy dữ liệu khớp lệnh trong Kho Tri Thức. Hãy dựa vào thông tin kỹ thuật sẵn có để hỗ trợ nhẹ nhàng."
 
     knowledge_text = ""
     for score, tab, row in top_matches:
@@ -140,20 +148,20 @@ async def chat_stream(req: ChatRequest):
     focused_knowledge = get_smart_focused_knowledge(latest_msg, req.role)
 
     system_instruction = f"""
-    Bạn là Trợ Lý KHO – Chuyên gia tư vấn & kỹ thuật phần cứng của Sapo. Thông minh, tận tâm và chuyên nghiệp.
+    Bạn là Trợ Lý KHO – Chuyên gia tư vấn & kỹ thuật phần cứng Sapo. Thông minh, tận tâm và chuyên nghiệp.
 
-    NHIỆM VỤ CỦA BẠN:
+    NHIỆM VỤ CỦA BẠN (TUÂN THỦ 100%):
     1. Đọc thật kỹ các "Khối Thông Tin" được trích xuất từ Kho Tri Thức dưới đây.
-    2. TẬN DỤNG TỐI ĐA SỰ THÔNG MINH: Giải thích rõ ràng, rành mạch từng bước (Bước 1, Bước 2...) cho khách dễ hiểu. KHÔNG được cộc lốc chỉ quăng mỗi link.
-    3. Đính kèm đầy đủ link tải Driver/Video bằng Markdown `[Tên](Link)` đan xen vào các bước hoặc để ở cuối.
-    4. CHÍNH XÁC TUYỆT ĐỐI (ZERO HALLUCINATION): Chỉ cung cấp thông số, địa chỉ, SĐT nếu có trong Kho Tri Thức. Nếu dữ liệu không có thông tin khách hỏi, hãy nhẹ nhàng báo chưa cập nhật và hướng dẫn liên hệ Tổng đài Sapo. TUYỆT ĐỐI KHÔNG BỊA ĐẶT.
-    5. ĐỊNH DẠNG: Dùng `➔` để chỉ hướng. Tên bạn là "Trợ Lý KHO".
+    2. TẬN DỤNG TỐI ĐA SỰ THÔNG MINH: Giải thích chi tiết rành mạch từng bước (Bước 1, Bước 2...) cho khách hàng dễ thao tác.
+    3. Trích xuất ĐẦY ĐỦ các link Driver Win/Mac/Video dưới dạng Markdown `[Tên hiển thị](URL)`.
+    4. CHÍNH XÁC TUYỆT ĐỐI (ZERO HALLUCINATION): Chỉ cung cấp địa chỉ, SĐT, thông số có trong Kho Tri Thức. Nếu dữ liệu thiếu, báo nhẹ nhàng chưa cập nhật và hướng dẫn liên hệ Tổng đài Sapo. TUYỆT ĐỐI KHÔNG BỊA ĐẶT.
+    5. ĐỊNH DẠNG: Dùng `➔` hoặc `->` chỉ hướng. Xưng danh "Trợ Lý KHO". KHÔNG dùng LaTeX (`$\\rightarrow$`).
 
-    BẢO MẬT (ROLE: {req.role}):
-    - Nếu là Khách Hàng: Dữ liệu nhạy cảm đã bị hệ thống chặn, cứ tư vấn bình thường.
-    - Nếu là Sale: Bạn sẽ thấy có thông tin nội bộ (Tab 4), hãy cung cấp đầy đủ cho Sale.
+    BẢO MẬT PHÂN QUYỀN (ROLE HIỆN TẠI: {req.role}):
+    - Role 'Khach_Hang': Dữ liệu bảo hành nội bộ đã được khóa 100% từ Server.
+    - Role 'Sale': Mở khóa đầy đủ thông tin bảo hành nội bộ, SĐT kỹ thuật trực ca.
 
-    KHO TRI THỨC ĐƯỢC TRÍCH XUẤT CHO CÂU HỎI NÀY:
+    KHO TRI THỨC TRÍCH XUẤT CHO CÂU HỎI NÀY:
     {focused_knowledge}
     """
 
@@ -166,15 +174,15 @@ async def chat_stream(req: ChatRequest):
             "parts": [{"text": m["text"]}]
         })
 
-    # Sử dụng đúng model 3.6 flash siêu tốc như đã thống nhất
+    # Cố định model đỉnh cao gemini-3.6-flash
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
     headers = {"Content-Type": "application/json"}
     payload = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": gemini_contents,
         "generationConfig": {
-            "temperature": 0.2, 
-            "maxOutputTokens": 2048
+            "temperature": 0.2,
+            "maxOutputTokens": 2500
         }
     }
 
@@ -199,20 +207,14 @@ async def chat_stream(req: ChatRequest):
                                     if chunk:
                                         has_yielded = True
                                         yield chunk
-                                elif "finishReason" in candidate and candidate["finishReason"] != "STOP":
-                                    has_yielded = True
-                                    yield f"\n\n*(Hệ thống ngừng xuất chữ do: {candidate['finishReason']})*"
                         except Exception:
                             pass
-        except httpx.ReadTimeout:
-            yield "❌ Lỗi: Máy chủ Google AI phản hồi quá lâu (Timeout). Vui lòng thử lại."
-            return
         except Exception as err:
-            yield f"❌ Lỗi kết nối: {str(err)}"
+            yield f"❌ Lỗi kết nối Google AI: {str(err)}"
             return
-            
+
         if not has_yielded:
-            yield "❌ Lỗi: Máy chủ Google AI trả về phản hồi rỗng (Có thể do lỗi định dạng hoặc từ khóa bị chặn)."
+            yield "❌ Lỗi: Máy chủ Google AI không trả về dữ liệu."
 
     return StreamingResponse(
         generate(), 
