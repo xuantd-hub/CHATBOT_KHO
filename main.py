@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Perfect Engine", version="129.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Master Engine", version="131.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -178,50 +178,45 @@ def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
                 knowledge_text += f"- {key}: {value}\n"
     return knowledge_text, [item[2] for item in top_matches]
 
-def format_gchat_syntax(text: str) -> str:
-    """ Chuyển đổi định dạng Markdown sang chuẩn Google Chat (<URL|Title> và *bold*) """
-    # Chuyển **bold** thành *bold*
-    text = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text)
-    # Chuyển Markdown Link [Tên](URL) thành chuẩn Google Chat <URL|Tên>
-    text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'<\2|\1>', text)
-    return text.replace(r'\rightarrow', '➔').replace(r'$\rightarrow$', '➔').replace('$', '').strip()
-
-def format_direct_gchat_reply(matches: list) -> str:
-    """ Trả về câu trả lời chuẩn Google Chat siêu tốc trong 0.001 giây """
-    response = "🤖 *Trợ Lý KHO Sapo*:\n\n"
+def format_clean_text_for_gchat(matches: list) -> str:
+    """ Trả về chuỗi text thuần túy an toàn tuyệt đối cho Google Chat API, triệt tiêu lỗi code 3 """
+    response_lines = ["🤖 Trợ Lý KHO Sapo:\n"]
     for row in matches[:2]:
         dev_name = row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", "Thiết bị Sapo"))
         guide = row.get("Noi_Dung_Huong_Dan", row.get("Cach_Khac_Phuc", row.get("Mo_Ta_Loi", row.get("Mo_Ta", ""))))
         driver = row.get("Link_Driver", row.get("Link_Video", ""))
 
-        response += f"📌 *{dev_name}*\n"
+        response_lines.append(f"📌 Thiết bị: {dev_name}")
         if guide:
-            response += f"• *Hướng dẫn:* {guide}\n"
+            response_lines.append(f"• Hướng dẫn: {guide}")
         if driver:
-            response += f"• ➔ *Tài nguyên:* {format_gchat_syntax(driver)}\n"
-        response += "\n"
-    return response.strip()
+            clean_driver = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', driver)
+            response_lines.append(f"• Link tài nguyên: {clean_driver}")
+        response_lines.append("")
+    
+    return "\n".join(response_lines).strip()
 
 def build_system_prompt(knowledge_context: str, role: str) -> str:
     return f"""
     Bạn là Trợ Lý KHO Sapo – Chuyên gia tư vấn kỹ thuật phần cứng Sapo.
 
-    QUY TẮC PHẢN HỒI:
-    1. KHÔNG TỰ VẼ BẢNG RÁC / BẢNG CHUẨN BỊ KHÔNG CÓ TRONG DỮ LIỆU.
+    QUY TẮC PHẢN HỒI (RẤT QUAN TRỌNG):
+    1. **KHÔNG TỰ VẼ BẢNG RÁC / BẢNG CHUẨN BỊ KHÔNG CÓ TRONG DỮ LIỆU.**
     2. Liệt kê các phương pháp theo dạng gạch đầu dòng (`-` hoặc `•`) rõ ràng.
-    3. Đính kèm ĐẦY ĐỦ link đúng cú pháp Markdown: `[Tên hiển thị](URL)`.
-    4. Xưng "Trợ Lý KHO". Dùng `➔` chỉ hướng.
+    3. Đính kèm ĐẦY ĐỦ link (Driver, Video, Doc) đúng theo từng phương pháp bằng cú pháp Markdown: `[Tên hiển thị](URL)`.
+    4. Trả lời thẳng vào giải pháp, ngắn gọn, súc tích, dễ hiểu.
+    5. Xưng "Trợ Lý KHO". Dùng `➔` chỉ hướng.
 
     PHÂN QUYỀN (ROLE: {role}):
     - 'Khach_Hang': Bảo hành Tab 4 bị khóa.
     - 'Sale': Mở khóa bảo hành nội bộ.
 
-    DỮ LIỆU KỸ THUẬT:
+    DỮ LIỆU KHO TRI THỨC KỸ THUẬT:
     {knowledge_context}
     """
 
 # ==========================================
-# 1. CỔNG WEB VERCEL (/chat) - GROQ AI STREAMING
+# 1. CỔNG WEB VERCEL (/chat) - GROQ STREAMING
 # ==========================================
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -309,16 +304,19 @@ async def generate_gemini_stream(system_instruction: str, messages: list):
         yield f"❌ Lỗi AI: {str(err)}"
 
 # ==========================================
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - RESPOND IN 0.001s
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - DỰ PHÒNG AN TOÀN TỐI ĐA
 # ==========================================
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
     try:
         event = await request.json()
-        event_type = event.get("type")
+        event_type = event.get("type", "")
 
         if event_type == "ADDED_TO_SPACE":
-            return JSONResponse(content={"text": "👋 Xin chào! Tôi là *Trợ Lý KHO Sapo*. Hãy gõ câu hỏi kỹ thuật để tôi hỗ trợ ngay 24/7!"})
+            return JSONResponse(
+                content={"text": "👋 Xin chào! Tôi là Trợ Lý KHO Sapo. Hãy gõ câu hỏi kỹ thuật để tôi hỗ trợ ngay!"},
+                headers={"Content-Type": "application/json; charset=utf-8"}
+            )
 
         if event_type == "MESSAGE":
             user_message = event.get("message", {}).get("text", "")
@@ -326,17 +324,26 @@ async def google_chat_webhook(request: Request):
 
             quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
             if not cleaned_message or cleaned_message.lower() in quick_greetings:
-                return JSONResponse(content={
-                    "text": "👋 Xin chào! Em là *Trợ Lý KHO Sapo*. Anh/chị cần hỗ trợ tra cứu thông số máy in, cài đặt driver hay khắc phục lỗi gì ạ?"
-                })
+                return JSONResponse(
+                    content={"text": "👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in, cài đặt driver hay khắc phục lỗi gì ạ?"},
+                    headers={"Content-Type": "application/json; charset=utf-8"}
+                )
 
-            # Trả về câu trả lời định dạng chuẩn Google Chat ngay lập tức (0.001s)
             _, raw_matches = get_high_precision_knowledge(cleaned_message, role="Sale")
-            reply_text = format_direct_gchat_reply(raw_matches)
+            safe_text = format_clean_text_for_gchat(raw_matches)
 
-            return JSONResponse(content={"text": reply_text})
+            return JSONResponse(
+                content={"text": safe_text},
+                headers={"Content-Type": "application/json; charset=utf-8"}
+            )
 
     except Exception:
-        return JSONResponse(content={"text": "👋 Trợ Lý KHO Sapo đã nhận thông tin. Bạn cần tra cứu thiết bị nào ạ?"})
+        return JSONResponse(
+            content={"text": "👋 Trợ Lý KHO Sapo đã nhận thông tin. Anh/chị cần tra cứu thiết bị nào ạ?"},
+            headers={"Content-Type": "application/json; charset=utf-8"}
+        )
 
-    return JSONResponse(content={"text": "OK"})
+    return JSONResponse(
+        content={"text": "OK"},
+        headers={"Content-Type": "application/json; charset=utf-8"}
+    )
