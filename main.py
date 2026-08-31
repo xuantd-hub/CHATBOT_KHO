@@ -9,8 +9,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from google import genai
+from google.genai import types
 
-app = FastAPI(title="Trợ Lý KHO Sapo Gemini Bulletproof Engine", version="140.2")
+app = FastAPI(title="Trợ Lý KHO Sapo GenAI SDK Engine", version="141.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,6 +25,14 @@ SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
+
+# Khởi tạo GenAI Client chính thức (hỗ trợ hoàn hảo khóa AQ. mới nhất)
+genai_client = None
+if GEMINI_API_KEY:
+    try:
+        genai_client = genai.Client(api_key=GEMINI_API_KEY)
+    except Exception:
+        pass
 
 RAM_CACHE = {}
 
@@ -75,7 +85,7 @@ async def load_sheet_data_async():
 
 @app.get("/")
 def health_check():
-    return {"status": "healthy", "provider": "Google Gemini", "gemini_model": GEMINI_MODEL}
+    return {"status": "healthy", "provider": "Google GenAI SDK", "gemini_model": GEMINI_MODEL}
 
 @app.get("/reload")
 async def reload_data():
@@ -144,39 +154,34 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
             if value: knowledge_text += f"- {key}: {value}\n"
     return knowledge_text
 
-def build_combined_prompt(knowledge_context: str, user_message: str) -> str:
+def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
-Bạn là Trợ Lý KHO Sapo – Chuyên gia IT cao cấp hỗ trợ kỹ thuật thiết bị Sapo. 
+    Bạn là Trợ Lý KHO Sapo – Chuyên gia IT cao cấp hỗ trợ kỹ thuật thiết bị Sapo. Bạn phải thông minh, linh hoạt, biết tư duy liên kết dữ liệu.
 
-🎯 QUY TẮC PHẢN HỒI:
-1. Tư duy liên kết, hướng dẫn ngắn gọn, trực diện, thân thiện. Xưng "Em", gọi "Anh/chị". Dùng gạch đầu dòng, in đậm bước quan trọng.
-2. LUẬT THÉP CHỐNG BỊA ĐẶT: CẤM tuyệt đối bịa ra đường link website hoặc số điện thoại. Chỉ cung cấp Link nếu Link đó CÓ TRONG kho dữ liệu bên dưới.
+    🎯 QUY TẮC PHẢN HỒI:
+    1. Tư duy liên kết, hướng dẫn ngắn gọn, trực diện, thân thiện. Xưng "Em", gọi "Anh/chị". Dùng gạch đầu dòng, in đậm bước quan trọng.
+    2. LUẬT THÉP CHỐNG BỊA ĐẶT: CẤM tuyệt đối bịa ra đường link website hoặc số điện thoại. Chỉ cung cấp Link nếu Link đó CÓ TRONG kho dữ liệu bên dưới.
 
-KHO DỮ LIỆU GỐC CỦA SAPO:
-{knowledge_context}
+    KHO DỮ LIỆU GỐC CỦA SAPO:
+    {knowledge_context}
+    """
 
-CÂU HỎI CỦA NGƯỜI DÙNG: {user_message}
-"""
-
-async def call_gemini_bulletproof(full_prompt: str) -> str:
-    if not GEMINI_API_KEY:
+def call_genai_sync(system_prompt: str, user_msg: str) -> str:
+    if not genai_client:
         return "👋 Dạ em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thiết bị nào ạ?"
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "contents": [{"role": "user", "parts": [{"text": full_prompt}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1000}
-    }
     try:
-        res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=10.0)
-        if res.status_code == 200:
-            data = res.json()
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        else:
-            return f"Dạ hệ thống phản hồi lỗi từ Google ({res.status_code}), anh/chị thử lại nhé!"
-    except Exception:
-        return "Dạ hệ thống đang bận hoặc mất kết nối, anh/chị thử lại sau giây lát nhé!"
+        response = genai_client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=user_msg,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0.2,
+                max_output_tokens=1000,
+            )
+        )
+        return response.text
+    except Exception as e:
+        return f"Dạ hệ thống đang bận, anh/chị vui lòng thử lại nhé! ({str(e)[:40]})"
 
 def wrap_gsuite_addon_response(text_message: str) -> dict:
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', text_message)
@@ -203,37 +208,30 @@ async def chat_stream(req: ChatRequest):
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
     focused_knowledge = get_high_precision_knowledge(latest_msg, req.role)
-    full_prompt = build_combined_prompt(focused_knowledge, latest_msg)
+    system_instruction = build_smart_system_prompt(focused_knowledge)
 
-    if not GEMINI_API_KEY:
-        return StreamingResponse(iter(["Dạ chưa cấu hình GEMINI_API_KEY."]), media_type="text/plain")
+    if not genai_client:
+        return StreamingResponse(iter(["Dạ cấu hình GEMINI_API_KEY chưa được thiết lập."]), media_type="text/plain")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "contents": [{"role": "user", "parts": [{"text": full_prompt}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1000}
-    }
-
-    async def generate_gemini_stream():
+    async def generate_genai_stream():
         try:
-            async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload, timeout=12.0) as response:
-                if response.status_code == 200:
-                    async for line in response.aiter_lines():
-                        if line and line.startswith("data: "):
-                            try:
-                                data_json = json.loads(line[6:])
-                                if "candidates" in data_json and data_json["candidates"]:
-                                    chunk = data_json["candidates"][0]["content"]["parts"][0].get("text", "")
-                                    if chunk: yield chunk
-                            except Exception: pass
-                    return
-        except Exception: pass
-        
-        fallback_ans = await call_gemini_bulletproof(full_prompt)
-        yield fallback_ans
+            response_stream = genai_client.models.generate_content_stream(
+                model=GEMINI_MODEL,
+                contents=latest_msg,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.2,
+                    max_output_tokens=1000,
+                )
+            )
+            for chunk in response_stream:
+                if chunk.text:
+                    yield chunk.text
+        except Exception:
+            fallback_text = call_genai_sync(system_instruction, latest_msg)
+            yield fallback_text
 
-    return StreamingResponse(generate_gemini_stream(), media_type="text/plain")
+    return StreamingResponse(generate_genai_stream(), media_type="text/plain")
 
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -254,9 +252,9 @@ async def google_chat_webhook(request: Request):
             return JSONResponse(content=wrap_gsuite_addon_response(msg))
 
         focused_knowledge = get_high_precision_knowledge(cleaned_message, role="Sale")
-        full_prompt = build_combined_prompt(focused_knowledge, cleaned_message)
+        system_instruction = build_smart_system_prompt(focused_knowledge)
 
-        ai_response = await call_gemini_bulletproof(full_prompt)
+        ai_response = call_genai_sync(system_instruction, cleaned_message)
 
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
