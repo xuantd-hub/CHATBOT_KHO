@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Master Engine", version="131.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Universal Engine", version="132.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,7 +56,6 @@ async def shutdown_event():
 async def discover_active_groq_model():
     global ACTIVE_GROQ_MODEL
     if not GROQ_API_KEY:
-        print("⚠️ Chưa có GROQ_API_KEY, sẽ dùng Gemini dự phòng.")
         return
 
     url = "https://api.groq.com/openai/v1/models"
@@ -75,13 +74,11 @@ async def discover_active_groq_model():
             for pref in preferred_order:
                 if pref in model_ids:
                     ACTIVE_GROQ_MODEL = pref
-                    print(f"✅ Đã chọn Model Groq tối ưu: {ACTIVE_GROQ_MODEL}")
                     return
             if model_ids:
                 ACTIVE_GROQ_MODEL = model_ids[0]
                 return
-    except Exception as e:
-        print(f"⚠️ Lỗi kiểm tra Model Groq: {e}")
+    except Exception: pass
 
     ACTIVE_GROQ_MODEL = "llama-3.1-8b-instant"
 
@@ -97,8 +94,7 @@ async def fetch_single_tab_raw(tab: str):
                 if row_data:
                     records.append(row_data)
             return tab, records
-    except Exception as e:
-        print(f"⚠️ Cảnh báo nạp tab '{tab}': {e}")
+    except Exception: pass
     return tab, []
 
 async def load_sheet_data_async():
@@ -106,16 +102,11 @@ async def load_sheet_data_async():
     tasks = [fetch_single_tab_raw(tab) for tab in ALL_TABS]
     results = await asyncio.gather(*tasks)
     RAM_CACHE = {tab: records for tab, records in results}
-    print("✅ [CLOUD RUN] Đã nạp 100% dữ liệu RAM!")
     return {"status": "success"}
 
 @app.get("/")
 def health_check():
-    return {
-        "status": "healthy", 
-        "active_groq_model": ACTIVE_GROQ_MODEL,
-        "region": "asia-southeast1"
-    }
+    return {"status": "healthy", "active_groq_model": ACTIVE_GROQ_MODEL}
 
 @app.get("/reload")
 async def reload_data():
@@ -142,11 +133,9 @@ class ChatRequest(BaseModel):
 def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     query_lower = query.lower()
-    
     stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "máy", "thế", "nào", "bao", "nhiêu", "thông", "số", "in", "qua", "đã", "ok"}
     words = [w for w in query_lower.split() if len(w) > 1 and w not in stop_words]
-    if not words:
-        words = [query_lower]
+    if not words: words = [query_lower]
 
     scored_rows = []
     for tab in accessible_tabs:
@@ -154,32 +143,24 @@ def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
             row_text = " ".join(str(v).lower() for v in row.values())
             score = 0
             dev_name = str(row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", ""))).lower()
-            
             for w in words:
-                if len(w) >= 3 and w in dev_name:
-                    score += 50
-                elif w in row_text:
-                    score += 3
-            
-            if score > 0:
-                scored_rows.append((score, tab, row))
+                if len(w) >= 3 and w in dev_name: score += 50
+                elif w in row_text: score += 3
+            if score > 0: scored_rows.append((score, tab, row))
 
     scored_rows.sort(key=lambda x: x[0], reverse=True)
     top_matches = scored_rows[:2]
-
     if not top_matches:
         top_matches = [(1, "2_HUONG_DAN_CAI_DAT", r) for r in RAM_CACHE.get("2_HUONG_DAN_CAI_DAT", [])[:1]]
 
     knowledge_text = ""
     for score, tab, row in top_matches:
-        knowledge_text += f"\n=== DỮ LIỆU CHUẨN TỪ TAB [{tab}] ===\n"
+        knowledge_text += f"\n=== TAB [{tab}] ===\n"
         for key, value in row.items():
-            if value:
-                knowledge_text += f"- {key}: {value}\n"
+            if value: knowledge_text += f"- {key}: {value}\n"
     return knowledge_text, [item[2] for item in top_matches]
 
 def format_clean_text_for_gchat(matches: list) -> str:
-    """ Trả về chuỗi text thuần túy an toàn tuyệt đối cho Google Chat API, triệt tiêu lỗi code 3 """
     response_lines = ["🤖 Trợ Lý KHO Sapo:\n"]
     for row in matches[:2]:
         dev_name = row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", "Thiết bị Sapo"))
@@ -199,31 +180,39 @@ def format_clean_text_for_gchat(matches: list) -> str:
 def build_system_prompt(knowledge_context: str, role: str) -> str:
     return f"""
     Bạn là Trợ Lý KHO Sapo – Chuyên gia tư vấn kỹ thuật phần cứng Sapo.
-
-    QUY TẮC PHẢN HỒI (RẤT QUAN TRỌNG):
-    1. **KHÔNG TỰ VẼ BẢNG RÁC / BẢNG CHUẨN BỊ KHÔNG CÓ TRONG DỮ LIỆU.**
-    2. Liệt kê các phương pháp theo dạng gạch đầu dòng (`-` hoặc `•`) rõ ràng.
-    3. Đính kèm ĐẦY ĐỦ link (Driver, Video, Doc) đúng theo từng phương pháp bằng cú pháp Markdown: `[Tên hiển thị](URL)`.
-    4. Trả lời thẳng vào giải pháp, ngắn gọn, súc tích, dễ hiểu.
-    5. Xưng "Trợ Lý KHO". Dùng `➔` chỉ hướng.
-
-    PHÂN QUYỀN (ROLE: {role}):
-    - 'Khach_Hang': Bảo hành Tab 4 bị khóa.
-    - 'Sale': Mở khóa bảo hành nội bộ.
-
-    DỮ LIỆU KHO TRI THỨC KỸ THUẬT:
+    QUY TẮC PHẢN HỒI:
+    1. KHÔNG TỰ VẼ BẢNG RÁC KHÔNG CÓ TRONG DỮ LIỆU.
+    2. Liệt kê phương pháp gạch đầu dòng rõ ràng.
+    3. Đính kèm link Markdown `[Tên](URL)`.
+    4. Xưng "Trợ Lý KHO". Dùng `➔` chỉ hướng.
+    DỮ LIỆU:
     {knowledge_context}
     """
 
+def make_universal_gchat_response(text_message: str) -> dict:
+    """ Đóng gói JSON đa năng đáp ứng cả Google Chat Bot API lẫn Google Workspace Add-on Engine """
+    return {
+        "text": text_message,
+        "actionResponse": {
+            "type": "NEW_MESSAGE"
+        },
+        "renderActions": {
+            "action": {
+                "message": {
+                    "text": text_message
+                }
+            }
+        }
+    }
+
 # ==========================================
-# 1. CỔNG WEB VERCEL (/chat) - GROQ STREAMING
+# 1. CỔNG WEB VERCEL (/chat)
 # ==========================================
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
-    
     clean_q = re.sub(r'[^\w\s]', '', latest_msg.lower()).strip()
-    quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chào bạn nhé"]
+    quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
     if clean_q in quick_greetings:
         async def greeting_gen():
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
@@ -304,7 +293,7 @@ async def generate_gemini_stream(system_instruction: str, messages: list):
         yield f"❌ Lỗi AI: {str(err)}"
 
 # ==========================================
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - DỰ PHÒNG AN TOÀN TỐI ĐA
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - MULTI-SCHEMA SAFE
 # ==========================================
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -313,8 +302,9 @@ async def google_chat_webhook(request: Request):
         event_type = event.get("type", "")
 
         if event_type == "ADDED_TO_SPACE":
+            msg = "👋 Xin chào! Tôi là Trợ Lý KHO Sapo. Hãy gõ câu hỏi kỹ thuật để tôi hỗ trợ ngay!"
             return JSONResponse(
-                content={"text": "👋 Xin chào! Tôi là Trợ Lý KHO Sapo. Hãy gõ câu hỏi kỹ thuật để tôi hỗ trợ ngay!"},
+                content=make_universal_gchat_response(msg),
                 headers={"Content-Type": "application/json; charset=utf-8"}
             )
 
@@ -324,8 +314,9 @@ async def google_chat_webhook(request: Request):
 
             quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
             if not cleaned_message or cleaned_message.lower() in quick_greetings:
+                msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in, cài đặt driver hay khắc phục lỗi gì ạ?"
                 return JSONResponse(
-                    content={"text": "👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in, cài đặt driver hay khắc phục lỗi gì ạ?"},
+                    content=make_universal_gchat_response(msg),
                     headers={"Content-Type": "application/json; charset=utf-8"}
                 )
 
@@ -333,17 +324,18 @@ async def google_chat_webhook(request: Request):
             safe_text = format_clean_text_for_gchat(raw_matches)
 
             return JSONResponse(
-                content={"text": safe_text},
+                content=make_universal_gchat_response(safe_text),
                 headers={"Content-Type": "application/json; charset=utf-8"}
             )
 
     except Exception:
+        msg = "👋 Trợ Lý KHO Sapo đã nhận thông tin. Anh/chị cần tra cứu thiết bị nào ạ?"
         return JSONResponse(
-            content={"text": "👋 Trợ Lý KHO Sapo đã nhận thông tin. Anh/chị cần tra cứu thiết bị nào ạ?"},
+            content=make_universal_gchat_response(msg),
             headers={"Content-Type": "application/json; charset=utf-8"}
         )
 
     return JSONResponse(
-        content={"text": "OK"},
+        content=make_universal_gchat_response("OK"),
         headers={"Content-Type": "application/json; charset=utf-8"}
     )
