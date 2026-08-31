@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo GSuite Addon Engine", version="137.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Smart Engine", version="138.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -230,34 +230,41 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(iter(["❌ Dữ liệu chưa sẵn sàng"]), media_type="text/plain")
 
 # ==========================================
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - GSUITE ADDON DATA ACTION WRAPPER
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - MULTI-PATH PARSER
 # ==========================================
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
     try:
         event = await request.json()
-        event_type = event.get("type", "")
+
+        # Bóc tách event_type đa năng
+        event_type = event.get("type") or event.get("chat", {}).get("type") or ""
+
+        # Bóc tách tin nhắn người dùng từ mọi đường dẫn Google Event
+        user_message = ""
+        if isinstance(event.get("message"), dict):
+            user_message = event["message"].get("text", "")
+        elif isinstance(event.get("chat"), dict) and isinstance(event["chat"].get("message"), dict):
+            user_message = event["chat"]["message"].get("text", "")
+
+        # Làm sạch tin nhắn
+        cleaned_message = re.sub(r'<.*?>', '', user_message).replace("@Trợ Lý KHO Sapo", "").strip()
 
         if event_type == "ADDED_TO_SPACE":
             msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ câu hỏi để em hỗ trợ ngay 24/7!"
             return JSONResponse(content=wrap_gsuite_addon_response(msg))
 
-        if event_type == "MESSAGE":
-            user_message = event.get("message", {}).get("text", "")
-            cleaned_message = re.sub(r'<.*?>', '', user_message).replace("@Trợ Lý KHO Sapo", "").strip()
+        quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
+        if not cleaned_message or cleaned_message.lower() in quick_greetings:
+            msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"
+            return JSONResponse(content=wrap_gsuite_addon_response(msg))
 
-            quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
-            if not cleaned_message or cleaned_message.lower() in quick_greetings:
-                msg = "👋 Xin chào! Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"
-                return JSONResponse(content=wrap_gsuite_addon_response(msg))
+        # Tra cứu tri thức từ RAM Cache
+        _, raw_matches = get_high_precision_knowledge(cleaned_message, role="Sale")
+        safe_text = format_clean_text_for_gchat(raw_matches)
 
-            _, raw_matches = get_high_precision_knowledge(cleaned_message, role="Sale")
-            safe_text = format_clean_text_for_gchat(raw_matches)
-
-            return JSONResponse(content=wrap_gsuite_addon_response(safe_text))
+        return JSONResponse(content=wrap_gsuite_addon_response(safe_text))
 
     except Exception:
         msg = "👋 Trợ Lý KHO Sapo đã nhận thông tin. Anh/chị cần tra cứu thiết bị nào ạ?"
         return JSONResponse(content=wrap_gsuite_addon_response(msg))
-
-    return JSONResponse(content=wrap_gsuite_addon_response("OK"))
