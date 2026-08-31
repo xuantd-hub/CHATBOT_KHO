@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Gemini Enterprise Engine", version="154.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Gemini Engine", version="154.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,7 +24,7 @@ app.add_middleware(
 # ==========================================
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip() # Anh có thể đổi thành gemini-3.6-flash qua biến môi trường Cloud Run
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash").strip()
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
 RAM_CACHE_SHEETS = {}
@@ -41,7 +41,6 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 
 HTTP_CLIENT: httpx.AsyncClient = None
 
-# TỪ ĐIỂN ĐỒNG NGHĨA KỸ THUẬT SAPO
 SYNONYMS_DICT = {
     "kẹt dao": ["không cắt giấy", "lỗi cắt giấy", "kẹt dao", "hư dao cắt", "cutter"],
     "khổ giấy": ["kích thước giấy", "khổ tem", "khổ giấy in", "paper size", "kích thước tem"],
@@ -51,12 +50,6 @@ SYNONYMS_DICT = {
     "cài đặt": ["cài máy", "setup", "hướng dẫn cài", "cách cài", "cấu hình", "kết nối"]
 }
 
-# ==========================================
-# KHỞI TẠO HỆ THỐNG (LIFECYCLE)
-# ==========================================
-# ==========================================
-# KHỞI TẠO HỆ THỐNG (LIFECYCLE)
-# ==========================================
 @app.on_event("startup")
 async def startup_event():
     global HTTP_CLIENT
@@ -64,7 +57,7 @@ async def startup_event():
         timeout=httpx.Timeout(6.0, read=8.0),
         limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
     )
-    # 🚀 CHO PHÉP MỞ CỔNG 8080 NGAY LẬP TỨC: Tải dữ liệu chạy ngầm, không chặn Startup Probe của Cloud Run
+    # Tải dữ liệu ngầm để server mở cổng 8080 ngay lập tức, chống timeout Cloud Run
     asyncio.create_task(load_sheet_data_async())
 
 @app.on_event("shutdown")
@@ -72,9 +65,6 @@ async def shutdown_event():
     if HTTP_CLIENT:
         await HTTP_CLIENT.aclose()
 
-# ==========================================
-# XỬ LÝ DỮ LIỆU TỪ GOOGLE SHEET & DOCS
-# ==========================================
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
     try:
@@ -89,7 +79,6 @@ async def fetch_single_tab_raw(tab: str):
 async def fetch_google_doc_text(doc_url: str) -> str:
     if not doc_url or "docs.google.com/document" not in doc_url: return ""
     if doc_url in DOC_CONTENT_CACHE: return DOC_CONTENT_CACHE[doc_url]
-    
     try:
         match = re.search(r'/d/([a-zA-Z0-9-_]+)', doc_url)
         if match:
@@ -150,9 +139,6 @@ def extract_user_text(event: dict) -> str:
         return ""
     return deep_search(event)
 
-# ==========================================
-# KHO TRI THỨC VÀ HYBRID INTELLIGENCE PROMPT
-# ==========================================
 async def get_deep_knowledge_context(query: str, role: str) -> tuple[str, list]:
     global RAM_CACHE_SHEETS
     if not RAM_CACHE_SHEETS:
@@ -252,9 +238,6 @@ def wrap_gsuite_addon_response(text_message: str) -> dict:
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', text_message)
     return {"hostAppDataAction": {"chatDataAction": {"createMessageAction": {"message": {"text": clean_text}}}}}
 
-# ==========================================
-# CỔNG WEB VERCEL VÀ STREAMING (GEMINI STREAM)
-# ==========================================
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
@@ -295,9 +278,6 @@ async def chat_stream(req: ChatRequest):
 
     return StreamingResponse(generate_gemini(), media_type="text/plain")
 
-# ==========================================
-# CỔNG GOOGLE CHAT BOT (/google-chat)
-# ==========================================
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
     try:
