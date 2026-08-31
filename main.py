@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Universal Engine", version="132.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Card v1 Engine", version="133.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -160,22 +160,55 @@ def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
             if value: knowledge_text += f"- {key}: {value}\n"
     return knowledge_text, [item[2] for item in top_matches]
 
-def format_clean_text_for_gchat(matches: list) -> str:
-    response_lines = ["🤖 Trợ Lý KHO Sapo:\n"]
+def build_google_card_v1_payload(matches: list) -> dict:
+    """ Đóng gói JSON chuẩn 100% theo google.apps.card.v1.Card Protobuf Schema """
+    text_items = []
     for row in matches[:2]:
         dev_name = row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", "Thiết bị Sapo"))
         guide = row.get("Noi_Dung_Huong_Dan", row.get("Cach_Khac_Phuc", row.get("Mo_Ta_Loi", row.get("Mo_Ta", ""))))
         driver = row.get("Link_Driver", row.get("Link_Video", ""))
 
-        response_lines.append(f"📌 Thiết bị: {dev_name}")
+        item_str = f"<b>📌 Thiết bị: {dev_name}</b><br>"
         if guide:
-            response_lines.append(f"• Hướng dẫn: {guide}")
+            item_str += f"• Hướng dẫn: {guide}<br>"
         if driver:
-            clean_driver = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', driver)
-            response_lines.append(f"• Link tài nguyên: {clean_driver}")
-        response_lines.append("")
-    
-    return "\n".join(response_lines).strip()
+            clean_link = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', driver)
+            item_str += f"• Link: <a href='{clean_link}'>{clean_link}</a><br>"
+        text_items.append(item_str)
+
+    html_content = "<br>".join(text_items).strip()
+    plain_text = re.sub(r'<[^>]+>', '', html_content)
+
+    # Cấu trúc Card v1 chuẩn mực
+    card_obj = {
+        "header": {
+            "title": "🤖 Trợ Lý KHO Sapo",
+            "subtitle": "Chuyên gia kỹ thuật thiết bị Sapo"
+        },
+        "sections": [
+            {
+                "widgets": [
+                    {
+                        "textParagraph": {
+                            "text": html_content
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+
+    return {
+        "text": plain_text,
+        "header": card_obj["header"],
+        "sections": card_obj["sections"],
+        "cardsV2": [
+            {
+                "cardId": "replyCard",
+                "card": card_obj
+            }
+        ]
+    }
 
 def build_system_prompt(knowledge_context: str, role: str) -> str:
     return f"""
@@ -188,22 +221,6 @@ def build_system_prompt(knowledge_context: str, role: str) -> str:
     DỮ LIỆU:
     {knowledge_context}
     """
-
-def make_universal_gchat_response(text_message: str) -> dict:
-    """ Đóng gói JSON đa năng đáp ứng cả Google Chat Bot API lẫn Google Workspace Add-on Engine """
-    return {
-        "text": text_message,
-        "actionResponse": {
-            "type": "NEW_MESSAGE"
-        },
-        "renderActions": {
-            "action": {
-                "message": {
-                    "text": text_message
-                }
-            }
-        }
-    }
 
 # ==========================================
 # 1. CỔNG WEB VERCEL (/chat)
@@ -293,7 +310,7 @@ async def generate_gemini_stream(system_instruction: str, messages: list):
         yield f"❌ Lỗi AI: {str(err)}"
 
 # ==========================================
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - MULTI-SCHEMA SAFE
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - CARD V1 COMPLIANT
 # ==========================================
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -302,9 +319,9 @@ async def google_chat_webhook(request: Request):
         event_type = event.get("type", "")
 
         if event_type == "ADDED_TO_SPACE":
-            msg = "👋 Xin chào! Tôi là Trợ Lý KHO Sapo. Hãy gõ câu hỏi kỹ thuật để tôi hỗ trợ ngay!"
+            welcome_matches = [{"Ten_Thiet_Bi": "Trợ Lý KHO Sapo", "Noi_Dung_Huong_Dan": "Hãy gõ câu hỏi kỹ thuật để em hỗ trợ ngay 24/7!"}]
             return JSONResponse(
-                content=make_universal_gchat_response(msg),
+                content=build_google_card_v1_payload(welcome_matches),
                 headers={"Content-Type": "application/json; charset=utf-8"}
             )
 
@@ -314,28 +331,28 @@ async def google_chat_webhook(request: Request):
 
             quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
             if not cleaned_message or cleaned_message.lower() in quick_greetings:
-                msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in, cài đặt driver hay khắc phục lỗi gì ạ?"
+                greeting_matches = [{"Ten_Thiet_Bi": "Trợ Lý KHO Sapo", "Noi_Dung_Huong_Dan": "Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"}]
                 return JSONResponse(
-                    content=make_universal_gchat_response(msg),
+                    content=build_google_card_v1_payload(greeting_matches),
                     headers={"Content-Type": "application/json; charset=utf-8"}
                 )
 
             _, raw_matches = get_high_precision_knowledge(cleaned_message, role="Sale")
-            safe_text = format_clean_text_for_gchat(raw_matches)
+            card_payload = build_google_card_v1_payload(raw_matches)
 
             return JSONResponse(
-                content=make_universal_gchat_response(safe_text),
+                content=card_payload,
                 headers={"Content-Type": "application/json; charset=utf-8"}
             )
 
     except Exception:
-        msg = "👋 Trợ Lý KHO Sapo đã nhận thông tin. Anh/chị cần tra cứu thiết bị nào ạ?"
+        fallback_matches = [{"Ten_Thiet_Bi": "Trợ Lý KHO Sapo", "Noi_Dung_Huong_Dan": "Hệ thống đã nhận thông tin. Bạn cần tra cứu thiết bị nào ạ?"}]
         return JSONResponse(
-            content=make_universal_gchat_response(msg),
+            content=build_google_card_v1_payload(fallback_matches),
             headers={"Content-Type": "application/json; charset=utf-8"}
         )
 
     return JSONResponse(
-        content=make_universal_gchat_response("OK"),
+        content={"text": "OK"},
         headers={"Content-Type": "application/json; charset=utf-8"}
     )
