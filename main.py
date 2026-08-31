@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Smart Engine", version="138.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Deep Parser Engine", version="139.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -115,6 +115,38 @@ class ChatRequest(BaseModel):
     messages: list
     role: str = "Khach_Hang"
 
+def extract_user_text(event: dict) -> str:
+    """ Bóc tách câu hỏi người dùng từ MỌI cấp lồng JSON của Google Chat / GSuite Add-on """
+    if isinstance(event.get("message"), dict):
+        msg = event["message"]
+        if msg.get("text"): return msg["text"]
+        if msg.get("argumentText"): return msg["argumentText"]
+
+    if isinstance(event.get("chat"), dict):
+        chat = event["chat"]
+        if isinstance(chat.get("messagePayload"), dict) and isinstance(chat["messagePayload"].get("message"), dict):
+            m = chat["messagePayload"]["message"]
+            if m.get("text"): return m["text"]
+            if m.get("argumentText"): return m["argumentText"]
+        if isinstance(chat.get("message"), dict):
+            m = chat["message"]
+            if m.get("text"): return m["text"]
+            if m.get("argumentText"): return m["argumentText"]
+
+    def deep_search(obj):
+        if isinstance(obj, dict):
+            if "argumentText" in obj and isinstance(obj["argumentText"], str) and obj["argumentText"].strip():
+                return obj["argumentText"]
+            if "text" in obj and isinstance(obj["text"], str) and obj["text"].strip():
+                if not obj["text"].startswith("spaces/"):
+                    return obj["text"]
+            for k, v in obj.items():
+                res = deep_search(v)
+                if res: return res
+        return ""
+
+    return deep_search(event)
+
 def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     query_lower = query.lower()
@@ -163,7 +195,6 @@ def format_clean_text_for_gchat(matches: list) -> str:
     return "\n".join(response_lines).strip()
 
 def wrap_gsuite_addon_response(text_message: str) -> dict:
-    """ Đóng gói JSON chuẩn 100% cho luồng gsuiteaddons.googleapis.com """
     return {
         "hostAppDataAction": {
             "chatDataAction": {
@@ -230,36 +261,29 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(iter(["❌ Dữ liệu chưa sẵn sàng"]), media_type="text/plain")
 
 # ==========================================
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - MULTI-PATH PARSER
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - DEEP EXTRACTOR
 # ==========================================
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
     try:
         event = await request.json()
 
-        # Bóc tách event_type đa năng
-        event_type = event.get("type") or event.get("chat", {}).get("type") or ""
-
-        # Bóc tách tin nhắn người dùng từ mọi đường dẫn Google Event
-        user_message = ""
-        if isinstance(event.get("message"), dict):
-            user_message = event["message"].get("text", "")
-        elif isinstance(event.get("chat"), dict) and isinstance(event["chat"].get("message"), dict):
-            user_message = event["chat"]["message"].get("text", "")
-
-        # Làm sạch tin nhắn
+        # Bóc tách tin nhắn người dùng chính xác
+        user_message = extract_user_text(event)
         cleaned_message = re.sub(r'<.*?>', '', user_message).replace("@Trợ Lý KHO Sapo", "").strip()
+
+        event_type = event.get("type") or event.get("chat", {}).get("type") or ""
 
         if event_type == "ADDED_TO_SPACE":
             msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ câu hỏi để em hỗ trợ ngay 24/7!"
             return JSONResponse(content=wrap_gsuite_addon_response(msg))
 
-        quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
+        quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe"]
         if not cleaned_message or cleaned_message.lower() in quick_greetings:
             msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"
             return JSONResponse(content=wrap_gsuite_addon_response(msg))
 
-        # Tra cứu tri thức từ RAM Cache
+        # Tra cứu dữ liệu thực tế khi câu hỏi khác chuỗi rỗng
         _, raw_matches = get_high_precision_knowledge(cleaned_message, role="Sale")
         safe_text = format_clean_text_for_gchat(raw_matches)
 
