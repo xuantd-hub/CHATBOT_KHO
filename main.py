@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Gemini Engine", version="154.1")
+app = FastAPI(title="Trợ Lý KHO Sapo Stable Engine", version="154.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,12 +19,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ==========================================
-# CẤU HÌNH BIẾN MÔI TRƯỜNG & GEMINI API
-# ==========================================
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
 RAM_CACHE_SHEETS = {}
@@ -57,7 +54,6 @@ async def startup_event():
         timeout=httpx.Timeout(6.0, read=8.0),
         limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
     )
-    # Tải dữ liệu ngầm để server mở cổng 8080 ngay lập tức, chống timeout Cloud Run
     asyncio.create_task(load_sheet_data_async())
 
 @app.on_event("shutdown")
