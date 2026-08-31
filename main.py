@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Minimal Engine", version="155.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Gemini Bulletproof Engine", version="140.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,8 +22,9 @@ app.add_middleware(
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
+SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
-RAM_CACHE_SHEETS = {}
+RAM_CACHE = {}
 
 TABS_PUBLIC = [
     "1_THIET_BI_VA_LOI", 
@@ -34,109 +35,231 @@ TABS_PUBLIC = [
 TAB_PRIVATE = "4_DU_LIEU_NOI_BO"
 ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 
-SYNONYMS_DICT = {
-    "kẹt dao": ["không cắt giấy", "lỗi cắt giấy", "kẹt dao", "hư dao cắt", "cutter"],
-    "khổ giấy": ["kích thước giấy", "khổ tem", "khổ giấy in", "paper size", "kích thước tem"],
-    "điện thoại": ["xtest", "app xtest", "in qua lan", "đổi ip", "android", "ios", "wifi", "không dây"],
-    "máy tính": ["driver", "windows", "mac", "pc", "laptop", "cài driver", "cáp usb"],
-    "in ra giấy trắng": ["không ra mực", "trắng tinh", "mờ mực", "ngược giấy"],
-    "cài đặt": ["cài máy", "setup", "hướng dẫn cài", "cách cài", "cấu hình", "kết nối"]
-}
-
-async def background_load_sheets():
-    global RAM_CACHE_SHEETS
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            for tab in ALL_TABS:
-                url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
-                res = await client.get(url)
-                if res.status_code == 200:
-                    df = pd.read_csv(io.BytesIO(res.content)).fillna("")
-                    records = [{str(k): str(v).strip() for k, v in row.items() if str(v).strip()} for _, row in df.iterrows() if any(str(v).strip() for v in row.values)]
-                    RAM_CACHE_SHEETS[tab] = records
-    except Exception:
-        pass
+HTTP_CLIENT: httpx.AsyncClient = None
 
 @app.on_event("startup")
 async def startup_event():
-    # Chạy ngầm việc tải dữ liệu để Uvicorn mở cổng 8080 ngay lập tức, chống lỗi timeout Cloud Run
-    asyncio.create_task(background_load_sheets())
+    global HTTP_CLIENT
+    HTTP_CLIENT = httpx.AsyncClient(
+        timeout=httpx.Timeout(12.0, read=15.0),
+        limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
+    )
+    asyncio.create_task(load_sheet_data_async())
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    if HTTP_CLIENT:
+        await HTTP_CLIENT.aclose()
+
+async def fetch_single_tab_raw(tab: str):
+    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
+    try:
+        res = await HTTP_CLIENT.get(url, timeout=6.0)
+        if res.status_code == 200 and "text/csv" in res.headers.get("Content-Type", ""):
+            df = pd.read_csv(io.BytesIO(res.content)).fillna("")
+            records = []
+            for _, row in df.iterrows():
+                row_data = {str(k): str(v).strip() for k, v in row.items() if str(v).strip()}
+                if row_data:
+                    records.append(row_data)
+            return tab, records
+    except Exception: pass
+    return tab, []
+
+async def load_sheet_data_async():
+    global RAM_CACHE
+    tasks = [fetch_single_tab_raw(tab) for tab in ALL_TABS]
+    results = await asyncio.gather(*tasks)
+    RAM_CACHE = {tab: records for tab, records in results}
+    return {"status": "success"}
 
 @app.get("/")
 def health_check():
-    return {"status": "healthy", "model": GEMINI_MODEL}
+    return {"status": "healthy", "provider": "Google Gemini", "gemini_model": GEMINI_MODEL}
+
+@app.get("/reload")
+async def reload_data():
+    return await load_sheet_data_async()
 
 class ChatRequest(BaseModel):
     messages: list
     role: str = "Khach_Hang"
 
 def extract_user_text(event: dict) -> str:
-    if "message" in event and isinstance(event["message"], dict):
-        if "text" in event["message"]: return event["message"]["text"]
-        if "argumentText" in event["message"]: return event["message"]["argumentText"]
-    if "chat" in event and isinstance(event["chat"], dict):
+    if isinstance(event.get("message"), dict):
+        msg = event["message"]
+        if msg.get("text"): return msg["text"]
+        if msg.get("argumentText"): return msg["argumentText"]
+
+    if isinstance(event.get("chat"), dict):
         chat = event["chat"]
-        if "messagePayload" in chat and isinstance(chat["messagePayload"], dict):
-            if "message" in chat["messagePayload"] and isinstance(chat["messagePayload"]["message"], dict):
-                if "text" in chat["messagePayload"]["message"]: return chat["messagePayload"]["message"]["text"]
-        if "message" in chat and isinstance(chat["message"], dict):
-            if "text" in chat["message"]: return chat["message"]["text"]
-    return "Hỗ trợ thiết bị"
+        if isinstance(chat.get("messagePayload"), dict) and isinstance(chat["messagePayload"].get("message"), dict):
+            m = chat["messagePayload"]["message"]
+            if m.get("text"): return m["text"]
+            if m.get("argumentText"): return m["argumentText"]
+        if isinstance(chat.get("message"), dict):
+            m = chat["message"]
+            if m.get("text"): return m["text"]
+            if m.get("argumentText"): return m["argumentText"]
 
-def get_knowledge(query: str) -> str:
+    def deep_search(obj):
+        if isinstance(obj, dict):
+            if "argumentText" in obj and isinstance(obj["argumentText"], str) and obj["argumentText"].strip():
+                return obj["argumentText"]
+            if "text" in obj and isinstance(obj["text"], str) and obj["text"].strip():
+                if not obj["text"].startswith("spaces/"):
+                    return obj["text"]
+            for k, v in obj.items():
+                res = deep_search(v)
+                if res: return res
+        return ""
+
+    return deep_search(event)
+
+def get_high_precision_knowledge(query: str, role: str) -> str:
+    accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     query_lower = query.lower()
-    text_out = ""
-    for tab, rows in RAM_CACHE_SHEETS.items():
-        for row in rows:
-            row_str = " ".join(str(v) for v in row.values()).lower()
-            if any(kw in row_str for kw in query_lower.split() if len(kw) > 2):
-                for k, v in row.items():
-                    if v: text_out += f"- {k}: {v}\n"
-                break
-        if text_out: break
-    return text_out
+    stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "máy", "thế", "nào", "bao", "nhiêu", "thông", "số", "in", "qua", "đã", "ok"}
+    words = [w for w in query_lower.split() if len(w) > 1 and w not in stop_words]
+    if not words: words = [query_lower]
 
-async def call_gemini(system_prompt: str, user_msg: str) -> str:
+    scored_rows = []
+    for tab in accessible_tabs:
+        for row in RAM_CACHE.get(tab, []):
+            row_text = " ".join(str(v).lower() for v in row.values())
+            score = 0
+            dev_name = str(row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", ""))).lower()
+            for w in words:
+                if len(w) >= 3 and w in dev_name: score += 50
+                elif w in row_text: score += 3
+            if score > 0: scored_rows.append((score, tab, row))
+
+    scored_rows.sort(key=lambda x: x[0], reverse=True)
+    top_matches = scored_rows[:3]
+
+    knowledge_text = ""
+    for score, tab, row in top_matches:
+        knowledge_text += f"\n=== DỮ LIỆU TỪ TAB [{tab}] ===\n"
+        for key, value in row.items():
+            if value: knowledge_text += f"- {key}: {value}\n"
+    return knowledge_text
+
+def build_combined_prompt(knowledge_context: str, user_message: str) -> str:
+    return f"""
+Bạn là Trợ Lý KHO Sapo – Chuyên gia IT cao cấp hỗ trợ kỹ thuật thiết bị Sapo. 
+
+🎯 QUY TẮC PHẢN HỒI:
+1. Tư duy liên kết, hướng dẫn ngắn gọn, trực diện, thân thiện. Xưng "Em", gọi "Anh/chị". Dùng gạch đầu dòng, in đậm bước quan trọng.
+2. LUẬT THÉP CHỐNG BỊA ĐẶT: CẤM tuyệt đối bịa ra đường link website hoặc số điện thoại. Chỉ cung cấp Link nếu Link đó CÓ TRONG kho dữ liệu bên dưới.
+
+KHO DỮ LIỆU GỐC CỦA SAPO:
+{knowledge_context}
+
+CÂU HỎI CỦA NGƯỜI DÙNG: {user_message}
+"""
+
+async def call_gemini_bulletproof(full_prompt: str) -> str:
     if not GEMINI_API_KEY:
         return "👋 Dạ em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thiết bị nào ạ?"
-    
+
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     payload = {
-        "systemInstruction": {"parts": [{"text": system_prompt}]},
-        "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 800}
+        "contents": [{"role": "user", "parts": [{"text": full_prompt}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1000}
     }
     try:
-        async with httpx.AsyncClient(timeout=6.0) as client:
-            res = await client.post(url, headers=headers, json=payload)
-            if res.status_code == 200:
-                data = res.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
+        res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=10.0)
+        if res.status_code == 200:
+            data = res.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            return f"Dạ hệ thống phản hồi lỗi từ Google ({res.status_code}), anh/chị thử lại nhé!"
     except Exception:
-        pass
-    return "Dạ hệ thống đang tra cứu, anh/chị vui lòng thử lại nhé!"
+        return "Dạ hệ thống đang bận hoặc mất kết nối, anh/chị thử lại sau giây lát nhé!"
+
+def wrap_gsuite_addon_response(text_message: str) -> dict:
+    clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', text_message)
+    return {
+        "hostAppDataAction": {
+            "chatDataAction": {
+                "createMessageAction": {
+                    "message": {
+                        "text": clean_text
+                    }
+                }
+            }
+        }
+    }
 
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
-    knowledge = get_knowledge(latest_msg)
-    prompt = f"Bạn là Trợ Lý KHO Sapo. Trả lời ngắn gọn, thân thiện, không bịa đặt link.\n\nDữ liệu kho:\n{knowledge}"
-    
-    async def response_generator():
-        ans = await call_gemini(prompt, latest_msg)
-        yield ans
+    clean_q = re.sub(r'[^\w\s]', '', latest_msg.lower()).strip()
+    quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
+    if clean_q in quick_greetings:
+        async def greeting_gen():
+            yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
+        return StreamingResponse(greeting_gen(), media_type="text/plain")
+
+    focused_knowledge = get_high_precision_knowledge(latest_msg, req.role)
+    full_prompt = build_combined_prompt(focused_knowledge, latest_msg)
+
+    if not GEMINI_API_KEY:
+        return StreamingResponse(iter(["Dạ chưa cấu hình GEMINI_API_KEY."]), media_type="text/plain")
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": full_prompt}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1000}
+    }
+
+    async def generate_gemini_stream():
+        try:
+            async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload, timeout=12.0) as response:
+                if response.status_code == 200:
+                    async for line in response.aiter_lines():
+                        if line and line.startswith("data: "):
+                            try:
+                                data_json = json.loads(line[6:])
+                                if "candidates" in data_json and data_json["candidates"]:
+                                    chunk = data_json["candidates"][0]["content"]["parts"][0].get("text", "")
+                                    if chunk: yield chunk
+                            except Exception: pass
+                    return
+        except Exception: pass
         
-    return StreamingResponse(response_generator(), media_type="text/plain")
+        fallback_ans = await call_gemini_bulletproof(full_prompt)
+        yield fallback_ans
+
+    return StreamingResponse(generate_gemini_stream(), media_type="text/plain")
 
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
     try:
         event = await request.json()
-        text = extract_user_text(event)
-        knowledge = get_knowledge(text)
-        prompt = f"Bạn là Trợ Lý KHO Sapo. Trả lời ngắn gọn, thân thiện, không bịa đặt link.\n\nDữ liệu kho:\n{knowledge}"
-        ans = await call_gemini(prompt, text)
-        return JSONResponse(content={"hostAppDataAction": {"chatDataAction": {"createMessageAction": {"message": {"text": ans}}}}})
+        user_message = extract_user_text(event)
+        cleaned_message = re.sub(r'<.*?>', '', user_message).replace("@Trợ Lý KHO Sapo", "").strip()
+
+        event_type = event.get("type") or event.get("chat", {}).get("type") or ""
+
+        if event_type == "ADDED_TO_SPACE":
+            msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!"
+            return JSONResponse(content=wrap_gsuite_addon_response(msg))
+
+        quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe"]
+        if not cleaned_message or cleaned_message.lower() in quick_greetings:
+            msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"
+            return JSONResponse(content=wrap_gsuite_addon_response(msg))
+
+        focused_knowledge = get_high_precision_knowledge(cleaned_message, role="Sale")
+        full_prompt = build_combined_prompt(focused_knowledge, cleaned_message)
+
+        ai_response = await call_gemini_bulletproof(full_prompt)
+
+        return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
+
     except Exception:
-        return JSONResponse(content={"hostAppDataAction": {"chatDataAction": {"createMessageAction": {"message": {"text": "Dạ hệ thống đang bận, anh/chị thử lại nhé!"}}}}})
+        msg = "Dạ em đã nhận thông tin. Anh/chị cần tra cứu cài đặt hay khắc phục lỗi thiết bị nào ạ?"
+        return JSONResponse(content=wrap_gsuite_addon_response(msg))
