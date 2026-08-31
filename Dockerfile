@@ -13,5 +13,5 @@ COPY . .
 ENV PORT=8080
 EXPOSE 8080
 
-# Sử dụng python -m uvicorn để loại bỏ hoàn toàn lỗi lệnh click/uvicorn
+# Chạy uvicorn qua module python để tránh triệt để lỗi click
 CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
