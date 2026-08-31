@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Super Intelligent Engine", version="170.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Super Intelligent Engine", version="170.1")
 
 app.add_middleware(
     CORSMiddleware,
