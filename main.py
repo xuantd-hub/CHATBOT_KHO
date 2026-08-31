@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO High-Precision Engine", version="127.0")
+app = FastAPI(title="Trợ Lý KHO High-Precision Engine Clean", version="128.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,7 +21,7 @@ app.add_middleware(
 
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6KL69gMjPEhKZolLylLFY7PV70s9THj_I-CPACq59JBDA").strip()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
 ACTIVE_GROQ_MODEL = None
@@ -75,7 +75,7 @@ async def discover_active_groq_model():
             for pref in preferred_order:
                 if pref in model_ids:
                     ACTIVE_GROQ_MODEL = pref
-                    print(f"✅ Đã tự động chọn Model Groq tối ưu: {ACTIVE_GROQ_MODEL}")
+                    print(f"✅ Đã chọn Model Groq tối ưu: {ACTIVE_GROQ_MODEL}")
                     return
             if model_ids:
                 ACTIVE_GROQ_MODEL = model_ids[0]
@@ -140,11 +140,9 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
-    """ Thuật toán lọc chính xác cao: Khớp tuyệt đối mã thiết bị """
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     query_lower = query.lower()
     
-    # Loại bỏ các từ vô nghĩa
     stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "máy", "thế", "nào", "bao", "nhiêu", "thông", "số", "in", "qua", "đã", "ok"}
     words = [w for w in query_lower.split() if len(w) > 1 and w not in stop_words]
     if not words:
@@ -157,10 +155,9 @@ def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
             score = 0
             dev_name = str(row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", ""))).lower()
             
-            # CỘNG ĐIỂM RẤT CAO NẾU KHỚP MÃ THIẾT BỊ (VD: spl01, k200l, xtest, a160m)
             for w in words:
                 if len(w) >= 3 and w in dev_name:
-                    score += 50  # Điểm tuyệt đối cho đúng tên máy
+                    score += 50
                 elif w in row_text:
                     score += 3
             
@@ -168,8 +165,6 @@ def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
                 scored_rows.append((score, tab, row))
 
     scored_rows.sort(key=lambda x: x[0], reverse=True)
-    
-    # CHỈ LẤY TỐI ĐA 2 DÒNG CHUẨN XÁC NHẤT
     top_matches = scored_rows[:2]
 
     if not top_matches:
@@ -177,21 +172,20 @@ def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
 
     knowledge_text = ""
     for score, tab, row in top_matches:
-        knowledge_text += f"\n=== NGUỒN DỮ LIỆU TỪ TAB [{tab}] ===\n"
+        knowledge_text += f"\n=== DỮ LIỆU CHUẨN TỪ TAB [{tab}] ===\n"
         for key, value in row.items():
             if value:
                 knowledge_text += f"- {key}: {value}\n"
     return knowledge_text, [item[2] for item in top_matches]
 
 def format_direct_smart_reply(matches: list) -> str:
-    """ Trả về kết quả siêu tốc trực tiếp từ dữ liệu Sheet cho Google Chat """
     response = "🤖 *Trợ Lý KHO Sapo*:\n\n"
     for row in matches[:2]:
         dev_name = row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", "Thiết bị Sapo"))
         guide = row.get("Noi_Dung_Huong_Dan", row.get("Cach_Khac_Phuc", row.get("Mo_Ta_Loi", row.get("Mo_Ta", ""))))
         driver = row.get("Link_Driver", row.get("Link_Video", ""))
 
-        response += f"📌 *Thiết bị/Vấn đề:* {dev_name}\n"
+        response += f"📌 *{dev_name}*\n"
         if guide:
             response += f"• *Hướng dẫn:* {guide}\n"
         if driver:
@@ -201,19 +195,20 @@ def format_direct_smart_reply(matches: list) -> str:
 
 def build_system_prompt(knowledge_context: str, role: str) -> str:
     return f"""
-    Bạn là Trợ Lý KHO Sapo – Chuyên gia kỹ thuật phần cứng & thiết bị Sapo.
-    
-    QUY TẮC BẮT BUỘC:
-    1. Chỉ được phép dùng thông tin có trong DỮ LIỆU KỸ THUẬT dưới đây. KHÔNG tự bịa thông tin.
-    2. Trả lời đúng trọng tâm thiết bị khách đang hỏi. Trình bày đẹp mắt bằng Markdown.
-    3. Đính kèm ĐẦY ĐỦ các URL (Driver, Video) có trong dữ liệu bằng định dạng Markdown: `[Tên hiển thị](URL)`. Không làm sai lệch URL.
-    4. Xưng danh "Trợ Lý KHO". Dùng `➔` chỉ hướng.
+    Bạn là Trợ Lý KHO Sapo – Chuyên gia tư vấn kỹ thuật phần cứng Sapo.
 
-    BẢO MẬT (ROLE: {role}):
-    - 'Khach_Hang': Dữ liệu bảo hành Tab 4 đã bị khóa 100%.
-    - 'Sale': Giải đáp chi tiết thông tin bảo hành nội bộ Tab 4.
+    QUY TẮC PHẢN HỒI (RẤT QUAN TRỌNG):
+    1. **KHÔNG TỰ VẼ BẢNG RÁC / BẢNG CHUẨN BỊ / BẢNG KHẮC PHỤC SỰ CỐ KHÔNG CÓ TRONG DỮ LIỆU.**
+    2. Nếu dữ liệu có nhiều phương pháp (Ví dụ: Đổi IP qua Tool PC, Đổi IP qua XTEST, Đổi IP Android/iOS), hãy trích xuất thành từng phương pháp rõ ràng bằng các gạch đầu dòng (`-` hoặc `•`).
+    3. Đính kèm ĐẦY ĐỦ link (Driver, Video, Doc) đúng theo từng phương pháp bằng cú pháp Markdown: `[Tên hiển thị](URL)`.
+    4. Trả lời thẳng vào giải pháp, ngắn gọn, súc tích, dễ hiểu.
+    5. Xưng "Trợ Lý KHO". Dùng `➔` chỉ hướng.
 
-    DỮ LIỆU KỸ THUẬT CHUẨN XÁC:
+    PHÂN QUYỀN (ROLE: {role}):
+    - 'Khach_Hang': Bảo hành Tab 4 bị khóa.
+    - 'Sale': Mở khóa bảo hành nội bộ.
+
+    DỮ LIỆU KHO TRI THỨC KỸ THUẬT:
     {knowledge_context}
     """
 
@@ -234,7 +229,6 @@ async def chat_stream(req: ChatRequest):
     focused_knowledge, raw_matches = get_high_precision_knowledge(latest_msg, req.role)
     system_instruction = build_system_prompt(focused_knowledge, req.role)
 
-    # Thử Groq API
     if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
         messages_payload = [{"role": "system", "content": system_instruction}]
         trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
@@ -247,7 +241,7 @@ async def chat_stream(req: ChatRequest):
         payload = {
             "model": ACTIVE_GROQ_MODEL,
             "messages": messages_payload,
-            "temperature": 0.05,  # Ép sát dữ liệu, cấm sáng tác linh tinh
+            "temperature": 0.0,
             "max_tokens": 1000,
             "stream": True
         }
@@ -270,7 +264,6 @@ async def chat_stream(req: ChatRequest):
                         return
             except Exception: pass
 
-            # Dự phòng Gemini Stream nếu Groq tạ
             async for chunk in generate_gemini_stream(system_instruction, req.messages):
                 yield chunk
 
@@ -290,7 +283,7 @@ async def generate_gemini_stream(system_instruction: str, messages: list):
     payload = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": gemini_contents,
-        "generationConfig": {"temperature": 0.05, "maxOutputTokens": 1000}
+        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 1000}
     }
     try:
         async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload) as response:
@@ -318,7 +311,6 @@ async def call_fast_ai(user_query: str) -> str:
     focused_knowledge, raw_matches = get_high_precision_knowledge(user_query, role="Sale")
     system_instruction = build_system_prompt(focused_knowledge, role="Sale")
 
-    # 1. Thử Groq API với TIMEOUT KHẮT KHE 2.0 giây để bảo vệ Google Chat khỏi bị đơ
     if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
@@ -328,7 +320,7 @@ async def call_fast_ai(user_query: str) -> str:
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_query}
             ],
-            "temperature": 0.05,
+            "temperature": 0.0,
             "max_tokens": 600
         }
         try:
@@ -339,7 +331,6 @@ async def call_fast_ai(user_query: str) -> str:
                 return format_text_for_google_chat(raw_reply)
         except Exception: pass
 
-    # 2. DỰ PHÒNG SIÊU TỐC NỘI BỘ (0.001s) - Tuyệt đối không để Google Chat bị Timeout!
     return format_direct_smart_reply(raw_matches)
 
 @app.post("/google-chat")
@@ -353,7 +344,7 @@ async def google_chat_webhook(request: Request):
 
         if event_type == "MESSAGE":
             user_message = event.get("message", {}).get("text", "")
-            cleaned_message = user_message.replace("@Trợ Lý KHO Sapo", "").strip()
+            cleaned_message = re.sub(r'<.*?>', '', user_message).replace("@Trợ Lý KHO Sapo", "").strip()
 
             quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
             if not cleaned_message or cleaned_message.lower() in quick_greetings:
@@ -365,6 +356,6 @@ async def google_chat_webhook(request: Request):
             return JSONResponse(content={"text": ai_reply})
 
     except Exception as e:
-        return JSONResponse(content={"text": f"❌ Lỗi hệ thống Bot: {str(e)}"})
+        return JSONResponse(content={"text": f"👋 Trợ Lý KHO Sapo đã nhận thông tin. Bạn cần tra cứu thiết bị nào ạ?"})
 
     return JSONResponse(content={"text": "OK"})
