@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Ultra Resilient Engine", version="160.3")
+app = FastAPI(title="Trợ Lý KHO Sapo Super Intelligent Engine", version="170.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH BIẾN MÔI TRƯỜNG CHUẨN MODEL GEMINI 3.6 FLASH
+# CẤU HÌNH BIẾN MÔI TRƯỜNG (CHUẨN XÁC MODEL GEMINI 3.6 FLASH)
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
@@ -48,8 +48,8 @@ HTTP_CLIENT: httpx.AsyncClient = None
 async def startup_event():
     global HTTP_CLIENT
     HTTP_CLIENT = httpx.AsyncClient(
-        timeout=httpx.Timeout(10.0, read=15.0),
-        limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
+        timeout=httpx.Timeout(15.0, read=45.0),
+        limits=httpx.Limits(max_keepalive_connections=30, max_connections=100)
     )
     asyncio.create_task(load_sheet_data_async())
     await discover_active_groq_model()
@@ -67,7 +67,7 @@ async def discover_active_groq_model():
     url = "https://api.groq.com/openai/v1/models"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
     try:
-        res = await HTTP_CLIENT.get(url, headers=headers, timeout=4.0)
+        res = await HTTP_CLIENT.get(url, headers=headers, timeout=5.0)
         if res.status_code == 200:
             models_data = res.json().get("data", [])
             model_ids = [m["id"] for m in models_data]
@@ -88,7 +88,7 @@ async def discover_active_groq_model():
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
     try:
-        res = await HTTP_CLIENT.get(url, timeout=6.0)
+        res = await HTTP_CLIENT.get(url, timeout=8.0)
         if res.status_code == 200 and "text/csv" in res.headers.get("Content-Type", ""):
             df = pd.read_csv(io.BytesIO(res.content)).fillna("")
             records = []
@@ -111,7 +111,7 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "160.3",
+        "version": "170.0",
         "active_groq_model": ACTIVE_GROQ_MODEL,
         "backup_gemini_model": GEMINI_MODEL
     }
@@ -188,23 +188,53 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
 
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
-Bạn là Trợ Lý KHO Sapo – Chuyên gia IT hỗ trợ kỹ thuật thiết bị Sapo cực kỳ THÔNG MINH, TINH TẾ và LỊCH SỰ.
+Bạn là Trợ Lý KHO Sapo – Chuyên gia IT cao cấp hỗ trợ kỹ thuật thiết bị Sapo cực kỳ THÔNG MINH, TINH TẾ và LỊCH SỰ. Bạn phải thông minh, linh hoạt, biết tư duy liên kết dữ liệu.
 
-🎯 QUY TẮC PHẢN HỒI THÔNG MINH:
-1. **Trực diện, chuyên nghiệp**: Xưng "Em", gọi "Anh/chị". Trình bày cấu trúc rõ ràng với gạch đầu dòng, in đậm tên máy/bước quan trọng.
-2. **NẾU CÂU HỎI CHỈ LÀ TÊN THIẾT BỊ NÓI CHUNG (VD: "spr02", "k200l"):**
-   - Hãy tóm tắt ngắn gọn loại máy, sau đó trình bày các mục quan trọng (Lỗi thường gặp & Cách xử lý, Link Driver/Tài liệu cài đặt) một cách mạch lạc.
-3. **LUẬT THÉP CHỐNG BỊA ĐẶT (BẮT BUỘC):**
-   - KHÔNG TỰ BỊA RA ĐƯỜNG LINK (URL) VÀ SỐ ĐIỆN THOẠI.
-   - Chỉ đính kèm Link Driver/Tài liệu nếu Link đó CÓ TRONG "KHO DỮ LIỆU GỐC" bên dưới.
-   - Trình bày đường link dạng: `[Tên hiển thị](URL)`.
 
-KHO DỮ LIỆU GỐC CỦA SAPO:
-{knowledge_context}
-"""
+🎯 QUY TẮC PHẢN HỒI THÔNG MINH (BẮT BUỘC TUÂN THỦ):
+
+1. **NẾU CÂU HỎI CHỈ LÀ TÊN THIẾT BỊ HOẶC TỪ KHÓA CHUNG CHUNG (Ví dụ: "spr02", "k200l", "xprinter"):**
+       - **TUYỆT ĐỐI KHÔNG** xả cả đống danh sách lỗi hay tài liệu dài dòng!
+       - Hãy hỏi lại người dùng một cách lịch sự để khoanh vùng nhu cầu:
+         "Dạ thiết bị **[Tên thiết bị]**, anh/chị đang cần em hỗ trợ mục nào dưới đây ạ?
+         1. 💻 **Cài đặt Driver trên Máy tính** (Windows / Mac)
+         2. 📱 **Cài đặt in qua Điện thoại** (App XTEST / Kết nối LAN / Đổi IP)
+         3. 🛠️ **Khắc phục sự cố** (Không cắt giấy, in ra giấy trắng, nghẽn mạng...)"
+
+🎯 QUY TẮC SÁNG TẠO CÓ KIỂM SOÁT (HYBRID INTELLIGENCE):
+    
+    1. **Tư duy liên kết & Điền khuyết:** 
+       - Nếu người dùng hỏi chung chung (VD: "cài máy in", "cài khổ tem") mà KHÔNG nói rõ tên máy: Hãy dùng kiến thức IT để đưa ra quy trình chuẩn căn bản. ĐỒNG THỜI hỏi khéo người dùng đang sử dụng dòng máy nào (SPL01, SPR02...) để bạn lấy đúng link Driver trong Kho dữ liệu.
+       - Nếu người dùng hỏi thông số (VD: "khổ giấy 2 tem"): Trả lời trực tiếp kích thước. Sau đó GỢI Ý THÊM cách thiết lập (Ví dụ: "Anh/chị có thể vào mục Printer Properties -> Paper Size để chọn đúng khổ giấy này").
+       - **ĐƯỢC PHÉP:** Sử dụng tri thức IT chung của bạn để giải thích cặn kẽ các thao tác trên máy tính (cách vào Control Panel, giải nén file, cấu hình IP).
+       - Phải biết liên kết dữ liệu , đọc dữ liệu từ các file đi kèm như google doc , google sheet, pdf, video... có các dữ liệu liên quan, chắt lọc trả lời chính xác, hay nhớ tuyệt đố chính xác.
+    2. **LUẬT THÉP CHỐNG BỊA ĐẶT (CẤM TUYỆT ĐỐI KHÔNG ĐƯỢC PHẠM):**
+       - KHÔNG TỰ BỊA RA ĐƯỜNG LINK (URL) VÀ SỐ ĐIỆN THOẠI HỖ TRỢ.
+       - Chỉ được phép cung cấp Link Driver / Tài liệu nếu Link đó CÓ TRONG mục "KHO DỮ LIỆU" bên dưới.
+       - Nếu trong dữ liệu không có Link, hãy chỉ hướng dẫn thao tác phần mềm, tuyệt đối không bịa link giả dạng sapo.vn/xxx.
+
+    📝 CÁCH TRÌNH BÀY:
+    - Trực diện, thân thiện. Xưng "Em", gọi "Anh/chị".
+    - Dùng gạch đầu dòng, In đậm các bước quan trọng. Tuyệt đối không dùng bảng.
+
+    ---
+    
+    2. **NẾU CÂU HỎI CÓ Ý ĐỊNH RÕ RÀNG (Ví dụ: "cài spr02 trên điện thoại", "máy in kẹt giấy", "driver spr02"):**
+       - Trả lời thẳng vào giải pháp, trình bày ngắn gọn, gạch đầu dòng rõ ràng.
+       - Đính kèm đầy đủ link tài liệu/driver/video từ dữ liệu.
+
+    3. **QUY TẮC ĐỊNH DẠNG TIN NHẮN:**
+       - Dùng xưng hô "Em" hoặc "Trợ Lý KHO Sapo", gọi người dùng là "Anh/chị".
+       - Đính kèm link chuẩn dạng `<URL>` hoặc `[Tên hiển thị](URL)`.
+       - KHÔNG tự vẽ bảng rác.
+
+    KHO DỮ LIỆU GỐC CỦA SAPO (Chỉ lấy thông số & Link từ đây):
+    {knowledge_context}
+    """
+
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI GEMINI (ĐÃ CHỈNH GEMINI-3.6-FLASH VÀ CÓ RETRY 503)
+# HÀM GỌI GEMINI 3.6 FLASH DỰ PHÒNG
 # ------------------------------------------------------------------------------
 async def call_gemini_with_retry(system_instruction: str, user_message: str) -> str:
     if not GEMINI_API_KEY:
@@ -218,30 +248,23 @@ async def call_gemini_with_retry(system_instruction: str, user_message: str) -> 
     payload = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": [{"role": "user", "parts": [{"text": user_message}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1000}
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2000}
     }
 
     for attempt in range(3):
         try:
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=12.0)
             if res.status_code == 200:
                 data = res.json()
                 return data["candidates"][0]["content"]["parts"][0]["text"]
-            elif res.status_code == 503:
+            elif res.status_code in [503, 429]:
                 await asyncio.sleep(1.0)
                 continue
-            else:
-                return f"⚠️ Google API Lỗi HTTP [{res.status_code}]: {res.text[:150]}"
-        except Exception as e:
-            if attempt == 2:
-                return f"⚠️ Lỗi kết nối Python: {str(e)}"
+        except Exception:
             await asyncio.sleep(1.0)
 
-    return "👋 Máy chủ AI đang bận tạm thời, anh/chị vui lòng thử lại sau vài giây nhé!"
+    return "👋 Dạ em đã nhận thông tin. Anh/chị cần hỗ trợ tra cứu thông số hay cài đặt thiết bị nào ạ?"
 
-# ------------------------------------------------------------------------------
-# HÀM GỌI LLM TỔNG HỢP (GROQ -> GEMINI 3.6 RETRY)
-# ------------------------------------------------------------------------------
 async def call_llm_single(system_instruction: str, user_message: str) -> str:
     if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
         url = "https://api.groq.com/openai/v1/chat/completions"
@@ -253,10 +276,10 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
                 {"role": "user", "content": user_message}
             ],
             "temperature": 0.2,
-            "max_tokens": 1000
+            "max_tokens": 2000
         }
         try:
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=6.0)
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=12.0)
             if res.status_code == 200:
                 data = res.json()
                 return data["choices"][0]["message"]["content"]
@@ -297,6 +320,9 @@ async def chat_stream(req: ChatRequest):
     system_instruction = build_smart_system_prompt(focused_knowledge)
 
     async def generate_response_stream():
+        has_yielded = False
+        
+        # 1. ƯU TIÊN GROQ STREAMING
         if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
             messages_payload = [{"role": "system", "content": system_instruction}]
             trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
@@ -310,12 +336,11 @@ async def chat_stream(req: ChatRequest):
                 "model": ACTIVE_GROQ_MODEL,
                 "messages": messages_payload,
                 "temperature": 0.2,
-                "max_tokens": 1000,
+                "max_tokens": 2000,
                 "stream": True
             }
             try:
-                success_groq = False
-                async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload, timeout=8.0) as response:
+                async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload) as response:
                     if response.status_code == 200:
                         async for line in response.aiter_lines():
                             if line and line.startswith("data: "):
@@ -327,15 +352,17 @@ async def chat_stream(req: ChatRequest):
                                     if choices:
                                         chunk = choices[0].get("delta", {}).get("content", "")
                                         if chunk:
-                                            success_groq = True
+                                            has_yielded = True
                                             yield chunk
                                 except Exception: pass
-                        if success_groq:
+                        if has_yielded:
                             return
             except Exception: pass
 
-        fallback_ans = await call_gemini_with_retry(system_instruction, latest_msg)
-        yield fallback_ans
+        # 2. DỰ PHÒNG SANG GEMINI 3.6 FLASH (NẾU GROQ KHÔNG TRẢ CHỮ NÀO)
+        if not has_yielded:
+            fallback_ans = await call_gemini_with_retry(system_instruction, latest_msg)
+            yield fallback_ans
 
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
