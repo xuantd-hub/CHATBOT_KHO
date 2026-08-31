@@ -111,6 +111,7 @@ async def discover_active_gemini_model():
                 if "generateContent" in m.get("supportedGenerationMethods", [])
             ]
             preferred_order = [
+                "gemini-3.7-flash",
                 "gemini-3.6-flash",
                 "gemini-2.5-flash",
                 "gemini-2.0-flash",
