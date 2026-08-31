@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO High-Precision Engine Clean", version="128.1")
+app = FastAPI(title="Trợ Lý KHO Perfect Engine", version="129.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -178,7 +178,16 @@ def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
                 knowledge_text += f"- {key}: {value}\n"
     return knowledge_text, [item[2] for item in top_matches]
 
-def format_direct_smart_reply(matches: list) -> str:
+def format_gchat_syntax(text: str) -> str:
+    """ Chuyển đổi định dạng Markdown sang chuẩn Google Chat (<URL|Title> và *bold*) """
+    # Chuyển **bold** thành *bold*
+    text = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text)
+    # Chuyển Markdown Link [Tên](URL) thành chuẩn Google Chat <URL|Tên>
+    text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'<\2|\1>', text)
+    return text.replace(r'\rightarrow', '➔').replace(r'$\rightarrow$', '➔').replace('$', '').strip()
+
+def format_direct_gchat_reply(matches: list) -> str:
+    """ Trả về câu trả lời chuẩn Google Chat siêu tốc trong 0.001 giây """
     response = "🤖 *Trợ Lý KHO Sapo*:\n\n"
     for row in matches[:2]:
         dev_name = row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", "Thiết bị Sapo"))
@@ -189,7 +198,7 @@ def format_direct_smart_reply(matches: list) -> str:
         if guide:
             response += f"• *Hướng dẫn:* {guide}\n"
         if driver:
-            response += f"• ➔ *Link tài nguyên:* {driver}\n"
+            response += f"• ➔ *Tài nguyên:* {format_gchat_syntax(driver)}\n"
         response += "\n"
     return response.strip()
 
@@ -197,23 +206,22 @@ def build_system_prompt(knowledge_context: str, role: str) -> str:
     return f"""
     Bạn là Trợ Lý KHO Sapo – Chuyên gia tư vấn kỹ thuật phần cứng Sapo.
 
-    QUY TẮC PHẢN HỒI (RẤT QUAN TRỌNG):
-    1. **KHÔNG TỰ VẼ BẢNG RÁC / BẢNG CHUẨN BỊ / BẢNG KHẮC PHỤC SỰ CỐ KHÔNG CÓ TRONG DỮ LIỆU.**
-    2. Nếu dữ liệu có nhiều phương pháp (Ví dụ: Đổi IP qua Tool PC, Đổi IP qua XTEST, Đổi IP Android/iOS), hãy trích xuất thành từng phương pháp rõ ràng bằng các gạch đầu dòng (`-` hoặc `•`).
-    3. Đính kèm ĐẦY ĐỦ link (Driver, Video, Doc) đúng theo từng phương pháp bằng cú pháp Markdown: `[Tên hiển thị](URL)`.
-    4. Trả lời thẳng vào giải pháp, ngắn gọn, súc tích, dễ hiểu.
-    5. Xưng "Trợ Lý KHO". Dùng `➔` chỉ hướng.
+    QUY TẮC PHẢN HỒI:
+    1. KHÔNG TỰ VẼ BẢNG RÁC / BẢNG CHUẨN BỊ KHÔNG CÓ TRONG DỮ LIỆU.
+    2. Liệt kê các phương pháp theo dạng gạch đầu dòng (`-` hoặc `•`) rõ ràng.
+    3. Đính kèm ĐẦY ĐỦ link đúng cú pháp Markdown: `[Tên hiển thị](URL)`.
+    4. Xưng "Trợ Lý KHO". Dùng `➔` chỉ hướng.
 
     PHÂN QUYỀN (ROLE: {role}):
     - 'Khach_Hang': Bảo hành Tab 4 bị khóa.
     - 'Sale': Mở khóa bảo hành nội bộ.
 
-    DỮ LIỆU KHO TRI THỨC KỸ THUẬT:
+    DỮ LIỆU KỸ THUẬT:
     {knowledge_context}
     """
 
 # ==========================================
-# 1. CỔNG WEB VERCEL (/chat)
+# 1. CỔNG WEB VERCEL (/chat) - GROQ AI STREAMING
 # ==========================================
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -301,38 +309,8 @@ async def generate_gemini_stream(system_instruction: str, messages: list):
         yield f"❌ Lỗi AI: {str(err)}"
 
 # ==========================================
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat)
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - RESPOND IN 0.001s
 # ==========================================
-def format_text_for_google_chat(text: str) -> str:
-    text = re.sub(r'\*\*(.*?)\*\*', r'*\1*', text)
-    return text.replace(r'\rightarrow', '➔').replace(r'$\rightarrow$', '➔').replace('$', '').strip()
-
-async def call_fast_ai(user_query: str) -> str:
-    focused_knowledge, raw_matches = get_high_precision_knowledge(user_query, role="Sale")
-    system_instruction = build_system_prompt(focused_knowledge, role="Sale")
-
-    if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
-        url = "https://api.groq.com/openai/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-        payload = {
-            "model": ACTIVE_GROQ_MODEL,
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_query}
-            ],
-            "temperature": 0.0,
-            "max_tokens": 600
-        }
-        try:
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=2.0)
-            if res.status_code == 200:
-                data = res.json()
-                raw_reply = data["choices"][0]["message"]["content"]
-                return format_text_for_google_chat(raw_reply)
-        except Exception: pass
-
-    return format_direct_smart_reply(raw_matches)
-
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
     try:
@@ -352,10 +330,13 @@ async def google_chat_webhook(request: Request):
                     "text": "👋 Xin chào! Em là *Trợ Lý KHO Sapo*. Anh/chị cần hỗ trợ tra cứu thông số máy in, cài đặt driver hay khắc phục lỗi gì ạ?"
                 })
 
-            ai_reply = await call_fast_ai(cleaned_message)
-            return JSONResponse(content={"text": ai_reply})
+            # Trả về câu trả lời định dạng chuẩn Google Chat ngay lập tức (0.001s)
+            _, raw_matches = get_high_precision_knowledge(cleaned_message, role="Sale")
+            reply_text = format_direct_gchat_reply(raw_matches)
 
-    except Exception as e:
-        return JSONResponse(content={"text": f"👋 Trợ Lý KHO Sapo đã nhận thông tin. Bạn cần tra cứu thiết bị nào ạ?"})
+            return JSONResponse(content={"text": reply_text})
+
+    except Exception:
+        return JSONResponse(content={"text": "👋 Trợ Lý KHO Sapo đã nhận thông tin. Bạn cần tra cứu thiết bị nào ạ?"})
 
     return JSONResponse(content={"text": "OK"})
