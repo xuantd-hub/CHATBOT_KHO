@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Deep Parser Engine", version="139.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Super Intelligent Engine", version="140.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -147,7 +147,7 @@ def extract_user_text(event: dict) -> str:
 
     return deep_search(event)
 
-def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
+def get_high_precision_knowledge(query: str, role: str) -> str:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     query_lower = query.lower()
     stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "máy", "thế", "nào", "bao", "nhiêu", "thông", "số", "in", "qua", "đã", "ok"}
@@ -166,41 +166,89 @@ def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
             if score > 0: scored_rows.append((score, tab, row))
 
     scored_rows.sort(key=lambda x: x[0], reverse=True)
-    top_matches = scored_rows[:2]
-    if not top_matches:
-        top_matches = [(1, "2_HUONG_DAN_CAI_DAT", r) for r in RAM_CACHE.get("2_HUONG_DAN_CAI_DAT", [])[:1]]
+    top_matches = scored_rows[:3]
 
     knowledge_text = ""
     for score, tab, row in top_matches:
-        knowledge_text += f"\n=== TAB [{tab}] ===\n"
+        knowledge_text += f"\n=== DỮ LIỆU TỪ TAB [{tab}] ===\n"
         for key, value in row.items():
             if value: knowledge_text += f"- {key}: {value}\n"
-    return knowledge_text, [item[2] for item in top_matches]
+    return knowledge_text
 
-def format_clean_text_for_gchat(matches: list) -> str:
-    response_lines = ["🤖 *Trợ Lý KHO Sapo*:\n"]
-    for row in matches[:2]:
-        dev_name = row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", "Thiết bị Sapo"))
-        guide = row.get("Noi_Dung_Huong_Dan", row.get("Cach_Khac_Phuc", row.get("Mo_Ta_Loi", row.get("Mo_Ta", ""))))
-        driver = row.get("Link_Driver", row.get("Link_Video", ""))
+def build_smart_system_prompt(knowledge_context: str) -> str:
+    return f"""
+    Bạn là Trợ Lý KHO Sapo – Chuyên gia hỗ trợ kỹ thuật thiết bị Sapo cực kỳ THÔNG MINH, TINH TẾ và LỊCH SỰ.
 
-        response_lines.append(f"📌 *Thiết bị:* {dev_name}")
-        if guide:
-            response_lines.append(f"• *Hướng dẫn:* {guide}")
-        if driver:
-            clean_driver = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', driver)
-            response_lines.append(f"• *Link tài nguyên:* {clean_driver}")
-        response_lines.append("")
-    
-    return "\n".join(response_lines).strip()
+    QUY TẮC PHẢN HỒI THÔNG MINH (BẮT BUỘC TUÂN THỦ):
+
+    1. **NẾU CÂU HỎI CHỈ LÀ TÊN THIẾT BỊ HOẶC TỪ KHÓA CHUNG CHUNG (Ví dụ: "spr02", "k200l", "xprinter"):**
+       - **TUYỆT ĐỐI KHÔNG** xả cả đống danh sách lỗi hay tài liệu dài dòng!
+       - Hãy hỏi lại người dùng một cách lịch sự để khoanh vùng nhu cầu:
+         "Dạ thiết bị **[Tên thiết bị]**, anh/chị đang cần em hỗ trợ mục nào dưới đây ạ?
+         1. 💻 **Cài đặt Driver trên Máy tính** (Windows / Mac)
+         2. 📱 **Cài đặt in qua Điện thoại** (App XTEST / Kết nối LAN / Đổi IP)
+         3. 🛠️ **Khắc phục sự cố** (Không cắt giấy, in ra giấy trắng, nghẽn mạng...)"
+
+    2. **NẾU CÂU HỎI CÓ Ý ĐỊNH RÕ RÀNG (Ví dụ: "cài spr02 trên điện thoại", "máy in kẹt giấy", "driver spr02"):**
+       - Trả lời thẳng vào giải pháp, trình bày ngắn gọn, gạch đầu dòng rõ ràng.
+       - Đính kèm đầy đủ link tài liệu/driver/video từ dữ liệu.
+
+    3. **QUY TẮC ĐỊNH DẠNG TIN NHẮN:**
+       - Dùng xưng hô "Em" hoặc "Trợ Lý KHO Sapo", gọi người dùng là "Anh/chị".
+       - Đính kèm link chuẩn dạng `<URL>` hoặc `[Tên hiển thị](URL)`.
+       - KHÔNG tự vẽ bảng rác.
+
+    DỮ LIỆU KHO TRI THỨC KỸ THUẬT:
+    {knowledge_context}
+    """
+
+async def call_llm_single(system_instruction: str, user_message: str) -> str:
+    """ Gọi AI Groq / Gemini trả về câu trả lời thông minh không streaming """
+    if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": ACTIVE_GROQ_MODEL,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_message}
+            ],
+            "temperature": 0.2,
+            "max_tokens": 1000
+        }
+        try:
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=6.0)
+            if res.status_code == 200:
+                data = res.json()
+                return data["choices"][0]["message"]["content"]
+        except Exception: pass
+
+    if GEMINI_API_KEY:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "systemInstruction": {"parts": [{"text": system_instruction}]},
+            "contents": [{"role": "user", "parts": [{"text": user_message}]}],
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1000}
+        }
+        try:
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=6.0)
+            if res.status_code == 200:
+                data = res.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception: pass
+
+    return "Dạ em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu cài đặt hay khắc phục lỗi thiết bị nào ạ?"
 
 def wrap_gsuite_addon_response(text_message: str) -> dict:
+    """ Đóng gói JSON chuẩn cho Google Chat """
+    clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', text_message)
     return {
         "hostAppDataAction": {
             "chatDataAction": {
                 "createMessageAction": {
                     "message": {
-                        "text": text_message
+                        "text": clean_text
                     }
                 }
             }
@@ -208,7 +256,7 @@ def wrap_gsuite_addon_response(text_message: str) -> dict:
     }
 
 # ==========================================
-# 1. CỔNG WEB VERCEL (/chat)
+# 1. CỔNG WEB VERCEL (/chat) - STREAMING AI
 # ==========================================
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -220,20 +268,22 @@ async def chat_stream(req: ChatRequest):
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
-    focused_knowledge, _ = get_high_precision_knowledge(latest_msg, req.role)
-    system_instruction = f"Bạn là Trợ Lý KHO Sapo. Trả lời rành mạch, gạch đầu dòng, kèm link Markdown.\nDỮ LIỆU:\n{focused_knowledge}"
+    focused_knowledge = get_high_precision_knowledge(latest_msg, req.role)
+    system_instruction = build_smart_system_prompt(focused_knowledge)
 
     if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
-        messages_payload = [
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": latest_msg}
-        ]
+        messages_payload = [{"role": "system", "content": system_instruction}]
+        trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
+        for m in trimmed:
+            role_type = "user" if m["role"] == "user" else "assistant"
+            messages_payload.append({"role": role_type, "content": m["text"]})
+
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
         payload = {
             "model": ACTIVE_GROQ_MODEL,
             "messages": messages_payload,
-            "temperature": 0.0,
+            "temperature": 0.2,
             "max_tokens": 1000,
             "stream": True
         }
@@ -258,24 +308,23 @@ async def chat_stream(req: ChatRequest):
 
         return StreamingResponse(generate_groq(), media_type="text/plain")
 
-    return StreamingResponse(iter(["❌ Dữ liệu chưa sẵn sàng"]), media_type="text/plain")
+    return StreamingResponse(iter(["Dạ dữ liệu đang được cập nhật, anh/chị thử lại sau giây lát nhé."]), media_type="text/plain")
 
 # ==========================================
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - DEEP EXTRACTOR
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - INTELLIGENT AI ENGINE
 # ==========================================
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
     try:
         event = await request.json()
 
-        # Bóc tách tin nhắn người dùng chính xác
         user_message = extract_user_text(event)
         cleaned_message = re.sub(r'<.*?>', '', user_message).replace("@Trợ Lý KHO Sapo", "").strip()
 
         event_type = event.get("type") or event.get("chat", {}).get("type") or ""
 
         if event_type == "ADDED_TO_SPACE":
-            msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ câu hỏi để em hỗ trợ ngay 24/7!"
+            msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!"
             return JSONResponse(content=wrap_gsuite_addon_response(msg))
 
         quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe"]
@@ -283,12 +332,14 @@ async def google_chat_webhook(request: Request):
             msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"
             return JSONResponse(content=wrap_gsuite_addon_response(msg))
 
-        # Tra cứu dữ liệu thực tế khi câu hỏi khác chuỗi rỗng
-        _, raw_matches = get_high_precision_knowledge(cleaned_message, role="Sale")
-        safe_text = format_clean_text_for_gchat(raw_matches)
+        # Lấy tri thức & gọi AI Llama 3.3 / Gemini suy luận câu trả lời thông minh
+        focused_knowledge = get_high_precision_knowledge(cleaned_message, role="Sale")
+        system_instruction = build_smart_system_prompt(focused_knowledge)
 
-        return JSONResponse(content=wrap_gsuite_addon_response(safe_text))
+        ai_response = await call_llm_single(system_instruction, cleaned_message)
+
+        return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
     except Exception:
-        msg = "👋 Trợ Lý KHO Sapo đã nhận thông tin. Anh/chị cần tra cứu thiết bị nào ạ?"
+        msg = "Dạ em đã nhận thông tin. Anh/chị cần tra cứu cài đặt hay khắc phục lỗi thiết bị nào ạ?"
         return JSONResponse(content=wrap_gsuite_addon_response(msg))
