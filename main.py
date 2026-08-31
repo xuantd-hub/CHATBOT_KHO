@@ -54,6 +54,9 @@ SYNONYMS_DICT = {
 # ==========================================
 # KHỞI TẠO HỆ THỐNG (LIFECYCLE)
 # ==========================================
+# ==========================================
+# KHỞI TẠO HỆ THỐNG (LIFECYCLE)
+# ==========================================
 @app.on_event("startup")
 async def startup_event():
     global HTTP_CLIENT
@@ -61,7 +64,8 @@ async def startup_event():
         timeout=httpx.Timeout(6.0, read=8.0),
         limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
     )
-    await load_sheet_data_async()
+    # 🚀 CHO PHÉP MỞ CỔNG 8080 NGAY LẬP TỨC: Tải dữ liệu chạy ngầm, không chặn Startup Probe của Cloud Run
+    asyncio.create_task(load_sheet_data_async())
 
 @app.on_event("shutdown")
 async def shutdown_event():
