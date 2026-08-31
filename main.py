@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo OpenAI Enterprise Engine", version="153.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Gemini Enterprise Engine", version="154.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,14 +20,12 @@ app.add_middleware(
 )
 
 # ==========================================
-# CẤU HÌNH BIẾN MÔI TRƯỜNG & OPENAI API
+# CẤU HÌNH BIẾN MÔI TRƯỜNG & GEMINI API
 # ==========================================
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip() # Thay vì dùng Groq, ta dùng OpenAI Key chuẩn
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip() # Anh có thể đổi thành gemini-3.6-flash qua biến môi trường Cloud Run
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
-
-# Sử dụng gpt-4o-mini: Siêu nhanh, siêu thông minh, giá rẻ và cực kỳ ổn định
-FIXED_OPENAI_MODEL = "gpt-4o-mini" 
 
 RAM_CACHE_SHEETS = {}
 DOC_CONTENT_CACHE = {}
@@ -41,6 +39,9 @@ TABS_PUBLIC = [
 TAB_PRIVATE = "4_DU_LIEU_NOI_BO"
 ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 
+HTTP_CLIENT: httpx.AsyncClient = None
+
+# TỪ ĐIỂN ĐỒNG NGHĨA KỸ THUẬT SAPO
 SYNONYMS_DICT = {
     "kẹt dao": ["không cắt giấy", "lỗi cắt giấy", "kẹt dao", "hư dao cắt", "cutter"],
     "khổ giấy": ["kích thước giấy", "khổ tem", "khổ giấy in", "paper size", "kích thước tem"],
@@ -50,14 +51,30 @@ SYNONYMS_DICT = {
     "cài đặt": ["cài máy", "setup", "hướng dẫn cài", "cách cài", "cấu hình", "kết nối"]
 }
 
+# ==========================================
+# KHỞI TẠO HỆ THỐNG (LIFECYCLE)
+# ==========================================
 @app.on_event("startup")
 async def startup_event():
+    global HTTP_CLIENT
+    HTTP_CLIENT = httpx.AsyncClient(
+        timeout=httpx.Timeout(6.0, read=8.0),
+        limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
+    )
     await load_sheet_data_async()
 
-async def fetch_single_tab_raw(client: httpx.AsyncClient, tab: str):
+@app.on_event("shutdown")
+async def shutdown_event():
+    if HTTP_CLIENT:
+        await HTTP_CLIENT.aclose()
+
+# ==========================================
+# XỬ LÝ DỮ LIỆU TỪ GOOGLE SHEET & DOCS
+# ==========================================
+async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
     try:
-        res = await client.get(url, timeout=6.0)
+        res = await HTTP_CLIENT.get(url, timeout=5.0)
         if res.status_code == 200 and "text/csv" in res.headers.get("Content-Type", ""):
             df = pd.read_csv(io.BytesIO(res.content)).fillna("")
             records = [{str(k): str(v).strip() for k, v in row.items() if str(v).strip()} for _, row in df.iterrows() if any(str(v).strip() for v in row.values)]
@@ -65,15 +82,16 @@ async def fetch_single_tab_raw(client: httpx.AsyncClient, tab: str):
     except Exception: pass
     return tab, []
 
-async def fetch_google_doc_text(client: httpx.AsyncClient, doc_url: str) -> str:
+async def fetch_google_doc_text(doc_url: str) -> str:
     if not doc_url or "docs.google.com/document" not in doc_url: return ""
     if doc_url in DOC_CONTENT_CACHE: return DOC_CONTENT_CACHE[doc_url]
+    
     try:
         match = re.search(r'/d/([a-zA-Z0-9-_]+)', doc_url)
         if match:
             doc_id = match.group(1)
             export_url = f"https://docs.google.com/document/d/{doc_id}/export?format=txt"
-            res = await client.get(export_url, timeout=4.0)
+            res = await HTTP_CLIENT.get(export_url, timeout=4.0)
             if res.status_code == 200:
                 text_content = res.text.strip()[:1800]
                 DOC_CONTENT_CACHE[doc_url] = text_content
@@ -83,17 +101,14 @@ async def fetch_google_doc_text(client: httpx.AsyncClient, doc_url: str) -> str:
 
 async def load_sheet_data_async():
     global RAM_CACHE_SHEETS
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            tasks = [fetch_single_tab_raw(client, tab) for tab in ALL_TABS]
-            results = await asyncio.gather(*tasks)
-            RAM_CACHE_SHEETS = {tab: records for tab, records in results}
-    except Exception: pass
+    tasks = [fetch_single_tab_raw(tab) for tab in ALL_TABS]
+    results = await asyncio.gather(*tasks)
+    RAM_CACHE_SHEETS = {tab: records for tab, records in results}
     return {"status": "success"}
 
 @app.get("/")
 def health_check():
-    return {"status": "healthy", "model": FIXED_OPENAI_MODEL, "provider": "OpenAI"}
+    return {"status": "healthy", "provider": "Google Gemini", "gemini_model": GEMINI_MODEL}
 
 @app.get("/reload")
 async def reload_data():
@@ -131,6 +146,9 @@ def extract_user_text(event: dict) -> str:
         return ""
     return deep_search(event)
 
+# ==========================================
+# KHO TRI THỨC VÀ HYBRID INTELLIGENCE PROMPT
+# ==========================================
 async def get_deep_knowledge_context(query: str, role: str) -> tuple[str, list]:
     global RAM_CACHE_SHEETS
     if not RAM_CACHE_SHEETS:
@@ -163,19 +181,16 @@ async def get_deep_knowledge_context(query: str, role: str) -> tuple[str, list]:
 
     knowledge_text = ""
     raw_rows = []
-    try:
-        async with httpx.AsyncClient(timeout=6.0) as client:
-            for score, tab, row in top_matches:
-                raw_rows.append(row)
-                knowledge_text += f"\n=== KẾT QUẢ TỪ KHO DỮ LIỆU [{tab}] ===\n"
-                for key, value in row.items():
-                    if value:
-                        knowledge_text += f"- {key}: {value}\n"
-                        if "docs.google.com/document" in str(value):
-                            doc_text = await fetch_google_doc_text(client, str(value))
-                            if doc_text:
-                                knowledge_text += f"  [NỘI DUNG TÀI LIỆU ĐÍNH KÈM]: {doc_text}\n"
-    except Exception: pass
+    for score, tab, row in top_matches:
+        raw_rows.append(row)
+        knowledge_text += f"\n=== KẾT QUẢ TỪ KHO DỮ LIỆU [{tab}] ===\n"
+        for key, value in row.items():
+            if value:
+                knowledge_text += f"- {key}: {value}\n"
+                if "docs.google.com/document" in str(value):
+                    doc_text = await fetch_google_doc_text(str(value))
+                    if doc_text:
+                        knowledge_text += f"  [NỘI DUNG TÀI LIỆU ĐÍNH KÈM]: {doc_text}\n"
 
     return knowledge_text, raw_rows
 
@@ -209,27 +224,23 @@ def format_direct_sheet_fallback(raw_rows: list) -> str:
         lines.append("")
     return "\n".join(lines).strip()
 
-async def call_llm_single(system_instruction: str, user_message: str, fallback_rows: list) -> str:
-    TEMPERATURE = 0.2
-    
-    if OPENAI_API_KEY:
-        url = "https://api.openai.com/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
-        payload = {
-            "model": FIXED_OPENAI_MODEL,
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_message}
-            ],
-            "temperature": TEMPERATURE,
-            "max_tokens": 1000
-        }
-        try:
-            async with httpx.AsyncClient(timeout=6.0) as client:
-                res = await client.post(url, headers=headers, json=payload)
-                if res.status_code == 200:
-                    return res.json()["choices"][0]["message"]["content"]
-        except Exception: pass
+async def call_gemini_single(system_instruction: str, user_message: str, fallback_rows: list) -> str:
+    if not GEMINI_API_KEY:
+        return format_direct_sheet_fallback(fallback_rows)
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
+        "contents": [{"role": "user", "parts": [{"text": user_message}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1000}
+    }
+    try:
+        res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=6.0)
+        if res.status_code == 200:
+            data = res.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception: pass
 
     return format_direct_sheet_fallback(fallback_rows)
 
@@ -238,7 +249,7 @@ def wrap_gsuite_addon_response(text_message: str) -> dict:
     return {"hostAppDataAction": {"chatDataAction": {"createMessageAction": {"message": {"text": clean_text}}}}}
 
 # ==========================================
-# CỔNG WEB VERCEL VÀ STREAMING (OPENAI STREAM)
+# CỔNG WEB VERCEL VÀ STREAMING (GEMINI STREAM)
 # ==========================================
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -246,37 +257,39 @@ async def chat_stream(req: ChatRequest):
     focused_knowledge, raw_rows = await get_deep_knowledge_context(latest_msg, req.role)
     system_instruction = build_hybrid_intelligence_prompt(focused_knowledge)
 
-    if OPENAI_API_KEY:
-        messages_payload = [{"role": "system", "content": system_instruction}]
-        for m in req.messages[-5:]:
-            messages_payload.append({"role": "user" if m["role"] == "user" else "assistant", "content": m["text"]})
+    if not GEMINI_API_KEY:
+        return StreamingResponse(iter([format_direct_sheet_fallback(raw_rows)]), media_type="text/plain")
 
-        url = "https://api.openai.com/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
-        payload = {"model": FIXED_OPENAI_MODEL, "messages": messages_payload, "temperature": 0.2, "stream": True}
+    gemini_contents = []
+    for m in req.messages[-5:]:
+        role_type = "user" if m["role"] == "user" else "model"
+        gemini_contents.append({"role": role_type, "parts": [{"text": m["text"]}]})
 
-        async def generate_openai():
-            try:
-                async with httpx.AsyncClient(timeout=8.0) as client:
-                    async with client.stream("POST", url, headers=headers, json=payload) as response:
-                        if response.status_code == 200:
-                            async for line in response.aiter_lines():
-                                if line and line.startswith("data: "):
-                                    data_str = line[6:].strip()
-                                    if data_str == "[DONE]": break
-                                    try:
-                                        choices = json.loads(data_str).get("choices", [])
-                                        if choices:
-                                            chunk = choices[0].get("delta", {}).get("content", "")
-                                            if chunk: yield chunk
-                                    except Exception: pass
-                            return
-            except Exception: pass
-            yield format_direct_sheet_fallback(raw_rows)
-        
-        return StreamingResponse(generate_openai(), media_type="text/plain")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
+        "contents": gemini_contents,
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1000}
+    }
 
-    return StreamingResponse(iter([format_direct_sheet_fallback(raw_rows)]), media_type="text/plain")
+    async def generate_gemini():
+        try:
+            async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload, timeout=8.0) as response:
+                if response.status_code == 200:
+                    async for line in response.aiter_lines():
+                        if line and line.startswith("data: "):
+                            try:
+                                data_json = json.loads(line[6:])
+                                if "candidates" in data_json and data_json["candidates"]:
+                                    chunk = data_json["candidates"][0]["content"]["parts"][0].get("text", "")
+                                    if chunk: yield chunk
+                            except Exception: pass
+                    return
+        except Exception: pass
+        yield format_direct_sheet_fallback(raw_rows)
+
+    return StreamingResponse(generate_gemini(), media_type="text/plain")
 
 # ==========================================
 # CỔNG GOOGLE CHAT BOT (/google-chat)
@@ -297,7 +310,7 @@ async def google_chat_webhook(request: Request):
         focused_knowledge, raw_rows = await get_deep_knowledge_context(cleaned_message, role="Sale")
         system_instruction = build_hybrid_intelligence_prompt(focused_knowledge)
 
-        ai_response = await call_llm_single(system_instruction, cleaned_message, raw_rows)
+        ai_response = await call_gemini_single(system_instruction, cleaned_message, raw_rows)
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
     except Exception:
