@@ -15,6 +15,15 @@
     <style>
         body { font-family: 'Inter', sans-serif; }
         #chat-box { scroll-behavior: smooth; }
+	/* Tìm đoạn .markdown-body trong thẻ <style> và thêm 	các dòng dưới đây */
+	.markdown-body {
+    		word-break: break-word;
+    		overflow-wrap: anywhere;
+	}
+
+	.markdown-body a {
+   		 word-break: break-all;
+	}
         .markdown-body p { margin-bottom: 0.6rem; line-height: 1.6; }
         .markdown-body ul, .markdown-body ol { margin-left: 1.25rem; margin-bottom: 0.6rem; }
         .markdown-body ul { list-style-type: disc; }
