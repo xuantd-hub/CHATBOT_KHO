@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Auto-Discovery Engine", version="112.0")
+app = FastAPI(title="Trợ Lý KHO High-Precision Engine", version="127.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,9 +24,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6KL69gMjPEhKZolLylLFY7PV70s9THj_I-CPACq59JBDA").strip()
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
-# Biến lưu tên Model Groq hoạt động thực tế
 ACTIVE_GROQ_MODEL = None
-
 RAM_CACHE = {}
 
 TABS_PUBLIC = [
@@ -44,7 +42,7 @@ HTTP_CLIENT: httpx.AsyncClient = None
 async def startup_event():
     global HTTP_CLIENT
     HTTP_CLIENT = httpx.AsyncClient(
-        timeout=httpx.Timeout(8.0, read=10.0),
+        timeout=httpx.Timeout(6.0, read=8.0),
         limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
     )
     await load_sheet_data_async()
@@ -56,29 +54,23 @@ async def shutdown_event():
         await HTTP_CLIENT.aclose()
 
 async def discover_active_groq_model():
-    """ Tự động lấy danh sách Model khả dụng từ Groq API của tài khoản """
     global ACTIVE_GROQ_MODEL
     if not GROQ_API_KEY:
-        print("⚠️ Chưa cấu hình GROQ_API_KEY, sẽ dùng Gemini dự phòng.")
+        print("⚠️ Chưa có GROQ_API_KEY, sẽ dùng Gemini dự phòng.")
         return
 
     url = "https://api.groq.com/openai/v1/models"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
     try:
-        res = await HTTP_CLIENT.get(url, headers=headers, timeout=5.0)
+        res = await HTTP_CLIENT.get(url, headers=headers, timeout=4.0)
         if res.status_code == 200:
             models_data = res.json().get("data", [])
             model_ids = [m["id"] for m in models_data]
-            print(f"📋 Các Model Groq hỗ trợ cho tài khoản của bạn: {model_ids}")
-            
-            # Ưu tiên các model siêu tốc theo thứ tự
             preferred_order = [
                 "llama-3.3-70b-versatile",
                 "llama-3.1-8b-instant",
                 "llama3-8b-8192",
-                "llama3-70b-8192",
-                "mixtral-8x7b-32768",
-                "gemma2-9b-it"
+                "llama3-70b-8192"
             ]
             for pref in preferred_order:
                 if pref in model_ids:
@@ -87,18 +79,16 @@ async def discover_active_groq_model():
                     return
             if model_ids:
                 ACTIVE_GROQ_MODEL = model_ids[0]
-                print(f"✅ Chọn Model mặc định từ danh sách: {ACTIVE_GROQ_MODEL}")
                 return
     except Exception as e:
-        print(f"⚠️ Lỗi kết nối kiểm tra Model Groq: {e}")
+        print(f"⚠️ Lỗi kiểm tra Model Groq: {e}")
 
-    # Fallback mặc định
-    ACTIVE_GROQ_MODEL = "llama3-8b-8192"
+    ACTIVE_GROQ_MODEL = "llama-3.1-8b-instant"
 
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
     try:
-        res = await HTTP_CLIENT.get(url, timeout=6.0)
+        res = await HTTP_CLIENT.get(url, timeout=5.0)
         if res.status_code == 200 and "text/csv" in res.headers.get("Content-Type", ""):
             df = pd.read_csv(io.BytesIO(res.content)).fillna("")
             records = []
@@ -149,62 +139,102 @@ class ChatRequest(BaseModel):
     messages: list
     role: str = "Khach_Hang"
 
-def get_focused_knowledge(query: str, role: str) -> str:
-    stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "máy", "thế", "nào", "bao", "nhiêu", "thông", "số"}
-    words = [w.lower() for w in query.split() if len(w) > 1 and w.lower() not in stop_words]
-    if not words:
-        words = [query.lower()]
-
+def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
+    """ Thuật toán lọc chính xác cao: Khớp tuyệt đối mã thiết bị """
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
-    scored_rows = []
+    query_lower = query.lower()
+    
+    # Loại bỏ các từ vô nghĩa
+    stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "máy", "thế", "nào", "bao", "nhiêu", "thông", "số", "in", "qua", "đã", "ok"}
+    words = [w for w in query_lower.split() if len(w) > 1 and w not in stop_words]
+    if not words:
+        words = [query_lower]
 
+    scored_rows = []
     for tab in accessible_tabs:
         for row in RAM_CACHE.get(tab, []):
             row_text = " ".join(str(v).lower() for v in row.values())
-            score = sum(1 for w in words if w in row_text)
-            model_name = str(row.get("Ten_Thiet_Bi", "")).lower()
-            if any(w in model_name for w in words):
-                score += 10
+            score = 0
+            dev_name = str(row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", ""))).lower()
+            
+            # CỘNG ĐIỂM RẤT CAO NẾU KHỚP MÃ THIẾT BỊ (VD: spl01, k200l, xtest, a160m)
+            for w in words:
+                if len(w) >= 3 and w in dev_name:
+                    score += 50  # Điểm tuyệt đối cho đúng tên máy
+                elif w in row_text:
+                    score += 3
+            
             if score > 0:
                 scored_rows.append((score, tab, row))
 
     scored_rows.sort(key=lambda x: x[0], reverse=True)
-    top_matches = scored_rows[:5]
+    
+    # CHỈ LẤY TỐI ĐA 2 DÒNG CHUẨN XÁC NHẤT
+    top_matches = scored_rows[:2]
 
     if not top_matches:
-        top_matches = [(1, "2_HUONG_DAN_CAI_DAT", r) for r in RAM_CACHE.get("2_HUONG_DAN_CAI_DAT", [])[:3]]
+        top_matches = [(1, "2_HUONG_DAN_CAI_DAT", r) for r in RAM_CACHE.get("2_HUONG_DAN_CAI_DAT", [])[:1]]
 
     knowledge_text = ""
     for score, tab, row in top_matches:
-        knowledge_text += f"\n--- [{tab}] ---\n"
+        knowledge_text += f"\n=== NGUỒN DỮ LIỆU TỪ TAB [{tab}] ===\n"
         for key, value in row.items():
-            knowledge_text += f"{key}: {value}\n"
-    return knowledge_text
+            if value:
+                knowledge_text += f"- {key}: {value}\n"
+    return knowledge_text, [item[2] for item in top_matches]
+
+def format_direct_smart_reply(matches: list) -> str:
+    """ Trả về kết quả siêu tốc trực tiếp từ dữ liệu Sheet cho Google Chat """
+    response = "🤖 *Trợ Lý KHO Sapo*:\n\n"
+    for row in matches[:2]:
+        dev_name = row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", "Thiết bị Sapo"))
+        guide = row.get("Noi_Dung_Huong_Dan", row.get("Cach_Khac_Phuc", row.get("Mo_Ta_Loi", row.get("Mo_Ta", ""))))
+        driver = row.get("Link_Driver", row.get("Link_Video", ""))
+
+        response += f"📌 *Thiết bị/Vấn đề:* {dev_name}\n"
+        if guide:
+            response += f"• *Hướng dẫn:* {guide}\n"
+        if driver:
+            response += f"• ➔ *Link tài nguyên:* {driver}\n"
+        response += "\n"
+    return response.strip()
+
+def build_system_prompt(knowledge_context: str, role: str) -> str:
+    return f"""
+    Bạn là Trợ Lý KHO Sapo – Chuyên gia kỹ thuật phần cứng & thiết bị Sapo.
+    
+    QUY TẮC BẮT BUỘC:
+    1. Chỉ được phép dùng thông tin có trong DỮ LIỆU KỸ THUẬT dưới đây. KHÔNG tự bịa thông tin.
+    2. Trả lời đúng trọng tâm thiết bị khách đang hỏi. Trình bày đẹp mắt bằng Markdown.
+    3. Đính kèm ĐẦY ĐỦ các URL (Driver, Video) có trong dữ liệu bằng định dạng Markdown: `[Tên hiển thị](URL)`. Không làm sai lệch URL.
+    4. Xưng danh "Trợ Lý KHO". Dùng `➔` chỉ hướng.
+
+    BẢO MẬT (ROLE: {role}):
+    - 'Khach_Hang': Dữ liệu bảo hành Tab 4 đã bị khóa 100%.
+    - 'Sale': Giải đáp chi tiết thông tin bảo hành nội bộ Tab 4.
+
+    DỮ LIỆU KỸ THUẬT CHUẨN XÁC:
+    {knowledge_context}
+    """
 
 # ==========================================
-# 1. CỔNG WEB VERCEL (/chat) - TỰ ĐỘNG DÒ ENGINE
+# 1. CỔNG WEB VERCEL (/chat)
 # ==========================================
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
-    focused_knowledge = get_focused_knowledge(latest_msg, req.role)
+    
+    clean_q = re.sub(r'[^\w\s]', '', latest_msg.lower()).strip()
+    quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chào bạn nhé"]
+    if clean_q in quick_greetings:
+        async def greeting_gen():
+            yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
+        return StreamingResponse(greeting_gen(), media_type="text/plain")
 
-    system_instruction = f"""
-    Bạn là Trợ Lý KHO Sapo – Chuyên gia kỹ thuật & thiết bị kho.
-    NHIỆM VỤ:
-    1. Trả lời rành mạch, chính xác dựa trên Kho Tri Thức dưới đây.
-    2. Cung cấp ĐẦY ĐỦ link Driver/Video bằng Markdown `[Tên](URL)`.
-    3. ZERO HALLUCINATION: Chỉ dùng thông tin trong dữ liệu. Dùng `➔` chỉ hướng. Xưng danh "Trợ Lý KHO".
+    focused_knowledge, raw_matches = get_high_precision_knowledge(latest_msg, req.role)
+    system_instruction = build_system_prompt(focused_knowledge, req.role)
 
-    BẢO MẬT (ROLE: {req.role}):
-    - 'Khach_Hang': Dữ liệu bảo hành Tab 4 đã bị khóa 100%.
-    - 'Sale': Mở khóa thông tin bảo hành nội bộ.
-
-    KHO TRI THỨC KỸ THUẬT:
-    {focused_knowledge}
-    """
-
-    # Thử Groq API trước
+    # Thử Groq API
     if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
         messages_payload = [{"role": "system", "content": system_instruction}]
         trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
@@ -217,7 +247,7 @@ async def chat_stream(req: ChatRequest):
         payload = {
             "model": ACTIVE_GROQ_MODEL,
             "messages": messages_payload,
-            "temperature": 0.1,
+            "temperature": 0.05,  # Ép sát dữ liệu, cấm sáng tác linh tinh
             "max_tokens": 1000,
             "stream": True
         }
@@ -229,28 +259,23 @@ async def chat_stream(req: ChatRequest):
                         async for line in response.aiter_lines():
                             if line and line.startswith("data: "):
                                 data_str = line[6:].strip()
-                                if data_str == "[DONE]":
-                                    break
+                                if data_str == "[DONE]": break
                                 try:
                                     data_json = json.loads(data_str)
                                     choices = data_json.get("choices", [])
                                     if choices:
                                         chunk = choices[0].get("delta", {}).get("content", "")
-                                        if chunk:
-                                            yield chunk
-                                except Exception:
-                                    pass
+                                        if chunk: yield chunk
+                                except Exception: pass
                         return
-            except Exception:
-                pass
-            
-            # Nếu Groq lỗi, tự chuyển sang Gemini Stream
+            except Exception: pass
+
+            # Dự phòng Gemini Stream nếu Groq tạ
             async for chunk in generate_gemini_stream(system_instruction, req.messages):
                 yield chunk
 
         return StreamingResponse(generate_groq(), media_type="text/plain", headers={"Cache-Control": "no-cache"})
 
-    # Nếu không có Groq Key, chạy Gemini trực tiếp
     return StreamingResponse(generate_gemini_stream(system_instruction, req.messages), media_type="text/plain", headers={"Cache-Control": "no-cache"})
 
 async def generate_gemini_stream(system_instruction: str, messages: list):
@@ -260,12 +285,12 @@ async def generate_gemini_stream(system_instruction: str, messages: list):
         role_type = "user" if m["role"] == "user" else "model"
         gemini_contents.append({"role": role_type, "parts": [{"text": m["text"]}]})
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
     headers = {"Content-Type": "application/json"}
     payload = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": gemini_contents,
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1000}
+        "generationConfig": {"temperature": 0.05, "maxOutputTokens": 1000}
     }
     try:
         async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload) as response:
@@ -278,8 +303,7 @@ async def generate_gemini_stream(system_instruction: str, messages: list):
                             if "candidates" in data_json and len(data_json["candidates"]) > 0:
                                 chunk = data_json["candidates"][0]["content"]["parts"][0].get("text", "")
                                 if chunk: yield chunk
-                        except Exception:
-                            pass
+                        except Exception: pass
     except Exception as err:
         yield f"❌ Lỗi AI: {str(err)}"
 
@@ -291,16 +315,10 @@ def format_text_for_google_chat(text: str) -> str:
     return text.replace(r'\rightarrow', '➔').replace(r'$\rightarrow$', '➔').replace('$', '').strip()
 
 async def call_fast_ai(user_query: str) -> str:
-    knowledge_context = get_focused_knowledge(user_query, role="Sale")
-    system_instruction = f"""
-    Bạn là Trợ Lý KHO Sapo trên Google Chat nội bộ.
-    Nhiệm vụ: Trả lời ngắn gọn, rành mạch, đi thẳng vào đáp án và đính kèm link Driver/Video bằng Markdown.
-    
-    KHO TRI THỨC KỸ THUẬT:
-    {knowledge_context}
-    """
+    focused_knowledge, raw_matches = get_high_precision_knowledge(user_query, role="Sale")
+    system_instruction = build_system_prompt(focused_knowledge, role="Sale")
 
-    # 1. Thử Groq API trước (tốc độ 0.3s)
+    # 1. Thử Groq API với TIMEOUT KHẮT KHE 2.0 giây để bảo vệ Google Chat khỏi bị đơ
     if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
@@ -310,35 +328,19 @@ async def call_fast_ai(user_query: str) -> str:
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_query}
             ],
-            "temperature": 0.1,
-            "max_tokens": 800
+            "temperature": 0.05,
+            "max_tokens": 600
         }
         try:
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=3.5)
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=2.0)
             if res.status_code == 200:
                 data = res.json()
                 raw_reply = data["choices"][0]["message"]["content"]
                 return format_text_for_google_chat(raw_reply)
-        except Exception:
-            pass
+        except Exception: pass
 
-    # 2. Dự phòng Gemini 3.6 Flash
-    url_gemini = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_API_KEY}"
-    payload_gemini = {
-        "systemInstruction": {"parts": [{"text": system_instruction}]},
-        "contents": [{"role": "user", "parts": [{"text": user_query}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 600}
-    }
-    try:
-        res = await HTTP_CLIENT.post(url_gemini, json=payload_gemini, timeout=3.8)
-        if res.status_code == 200:
-            data = res.json()
-            raw_reply = data["candidates"][0]["content"]["parts"][0]["text"]
-            return format_text_for_google_chat(raw_reply)
-    except Exception as e:
-        return f"❌ Hệ thống phản hồi chậm, bạn vui lòng gõ câu hỏi cụ thể hơn nhé."
-        
-    return "❌ Dữ liệu chưa sẵn sàng."
+    # 2. DỰ PHÒNG SIÊU TỐC NỘI BỘ (0.001s) - Tuyệt đối không để Google Chat bị Timeout!
+    return format_direct_smart_reply(raw_matches)
 
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
