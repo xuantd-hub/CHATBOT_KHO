@@ -12,4 +12,4 @@ COPY . .
 # Cloud Run tự động cấp cổng PORT thông qua biến môi trường
 ENV PORT 8080
 
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT}"]
+CMD exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}
