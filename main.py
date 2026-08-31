@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Final Engine", version="150.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Debug Engine", version="151.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -74,7 +74,7 @@ async def load_sheet_data_async():
 
 @app.get("/")
 def health_check():
-    return {"status": "healthy", "version": "150.0", "gemini_model": GEMINI_MODEL}
+    return {"status": "healthy", "version": "151.0", "gemini_model": GEMINI_MODEL}
 
 @app.get("/reload")
 async def reload_data():
@@ -143,30 +143,28 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
             if value: knowledge_text += f"- {key}: {value}\n"
     return knowledge_text
 
-async def call_gemini_api(system_prompt: str, user_msg: str) -> str:
+async def call_gemini_api_debug(system_prompt: str, user_msg: str) -> str:
     if not GEMINI_API_KEY:
-        return "👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thiết bị hay cài đặt nào ạ?"
+        return "⚠️ Lỗi: Chưa cấu hình GEMINI_API_KEY trong biến môi trường Cloud Run."
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-    # TRUYỀN KHÓA AQ. QUA HEADER CHUẨN CỦA GOOGLE API
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY
-    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    headers = {"Content-Type": "application/json"}
     payload = {
         "systemInstruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1000}
     }
+    
     try:
         res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
         if res.status_code == 200:
             data = res.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception:
-        pass
-
-    return "👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số hay cài đặt thiết bị nào ạ?"
+        else:
+            # HIỆN TRỰC TIẾP MÃ LỖI TỪ GOOGLE
+            return f"⚠️ Google API Trả Về Lỗi [HTTP {res.status_code}]: {res.text[:250]}"
+    except Exception as e:
+        return f"⚠️ Lỗi Kết Nối Python Exception: {str(e)}"
 
 def wrap_gsuite_addon_response(text_message: str) -> dict:
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', text_message)
@@ -187,18 +185,18 @@ async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
     clean_q = re.sub(r'[^\w\s]', '', latest_msg.lower()).strip()
     
-    # ⚡ XỬ LÝ CÂU CHÀO TỰ ĐỘNG - KHÔNG CẦN GỌI AI
-    quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe"]
-    if clean_q in quick_greetings:
+    # ⚡ XỬ LÝ CÂU CHÀO OFFLINE 100% - KHÔNG CẦN GỌI GOOGLE API
+    quick_greetings = ["chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe"]
+    if clean_q in quick_greetings or any(g in clean_q for g in ["chao", "chào"]):
         async def greeting_gen():
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
     focused_knowledge = get_high_precision_knowledge(latest_msg, req.role)
-    system_instruction = f"Bạn là Trợ Lý KHO Sapo. Trả lời thân thiện, ngắn gọn, dùng gạch đầu dòng.\n\nKHO DỮ LIỆU:\n{focused_knowledge}"
+    system_instruction = f"Bạn là Trợ Lý KHO Sapo. Trả lời ngắn gọn, dùng gạch đầu dòng.\n\nKHO DỮ LIỆU:\n{focused_knowledge}"
 
     async def generate_stream():
-        ans = await call_gemini_api(system_instruction, latest_msg)
+        ans = await call_gemini_api_debug(system_instruction, latest_msg)
         yield ans
 
     return StreamingResponse(generate_stream(), media_type="text/plain")
@@ -214,16 +212,15 @@ async def google_chat_webhook(request: Request):
         if event_type == "ADDED_TO_SPACE":
             return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay!"))
 
-        # ⚡ XỬ LÝ CÂU CHÀO TỰ ĐỘNG KHÔNG CẦN GỌI AI
-        quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe"]
-        if not cleaned_message or cleaned_message.lower() in quick_greetings:
-            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"))
+        quick_greetings = ["chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe"]
+        if not cleaned_message or cleaned_message.lower() in quick_greetings or "chào" in cleaned_message.lower():
+            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em me là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"))
 
         focused_knowledge = get_high_precision_knowledge(cleaned_message, role="Sale")
-        system_instruction = f"Bạn là Trợ Lý KHO Sapo. Trả lời thân thiện, ngắn gọn, dùng gạch đầu dòng.\n\nKHO DỮ LIỆU:\n{focused_knowledge}"
+        system_instruction = f"Bạn là Trợ Lý KHO Sapo. Trả lời ngắn gọn, dùng gạch đầu dòng.\n\nKHO DỮ LIỆU:\n{focused_knowledge}"
 
-        ai_response = await call_gemini_api(system_instruction, cleaned_message)
+        ai_response = await call_gemini_api_debug(system_instruction, cleaned_message)
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
-    except Exception:
-        return JSONResponse(content=wrap_gsuite_addon_response("👋 Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thiết bị nào ạ?"))
+    except Exception as e:
+        return JSONResponse(content=wrap_gsuite_addon_response(f"⚠️ Lỗi Google Chat Webhook: {str(e)}"))
