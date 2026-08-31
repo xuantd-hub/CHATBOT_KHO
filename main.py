@@ -27,7 +27,7 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip() # Để trống để hệ 
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
 genai_client = None
-ACTIVE_GEMINI_MODEL = "gemini-1.5-flash" # Giá trị mặc định an toàn
+ACTIVE_GEMINI_MODEL = "gemini-3.6-flash" # Giá trị mặc định an toàn
 
 if GEMINI_API_KEY:
     try:
