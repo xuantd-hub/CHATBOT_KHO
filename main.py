@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Pure Card Engine", version="134.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Standard Engine", version="135.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -160,63 +160,63 @@ def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
             if value: knowledge_text += f"- {key}: {value}\n"
     return knowledge_text, [item[2] for item in top_matches]
 
-def build_pure_gcard_v1(matches: list) -> dict:
-    """ Tạo đối tượng Card chuẩn 100% theo google.apps.card.v1.Card Proto Schema """
+def build_valid_gchat_message(matches: list) -> dict:
+    """ Đóng gói JSON chuẩn 100% theo Google Chat API Message Resource Schema """
     text_items = []
+    plain_items = ["🤖 Trợ Lý KHO Sapo:\n"]
     for row in matches[:2]:
         dev_name = row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", "Thiết bị Sapo"))
         guide = row.get("Noi_Dung_Huong_Dan", row.get("Cach_Khac_Phuc", row.get("Mo_Ta_Loi", row.get("Mo_Ta", ""))))
         driver = row.get("Link_Driver", row.get("Link_Video", ""))
 
         item_str = f"<b>📌 Thiết bị: {dev_name}</b><br>"
+        plain_str = f"📌 Thiết bị: {dev_name}\n"
         if guide:
             clean_guide = guide.replace("\n", "<br>")
             item_str += f"• Hướng dẫn: {clean_guide}<br>"
+            plain_str += f"• Hướng dẫn: {guide}\n"
         if driver:
             clean_driver = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'<a href="\2">\1</a>', driver)
             if not re.search(r'<a href=', clean_driver) and driver.startswith("http"):
                 clean_driver = f'<a href="{driver}">{driver}</a>'
             item_str += f"• Link tài nguyên: {clean_driver}<br>"
+            plain_str += f"• Link: {driver}\n"
         text_items.append(item_str)
+        plain_items.append(plain_str)
 
     html_content = "<br>".join(text_items).strip()
+    plain_text = "\n".join(plain_items).strip()
 
-    # KHÔNG CHỨA THẺ 'text' Hay 'cardsV2' Ở CẤP NGOÀI
+    # Cấu trúc Root chỉ chứa 'text' và 'cardsV2' đúng chuẩn Google Chat API
     return {
-        "header": {
-            "title": "🤖 Trợ Lý KHO Sapo",
-            "subtitle": "Chuyên gia kỹ thuật Sapo 24/7"
-        },
-        "sections": [
+        "text": plain_text,
+        "cardsV2": [
             {
-                "widgets": [
-                    {
-                        "textParagraph": {
-                            "text": html_content
+                "cardId": "sapo_kho_card",
+                "card": {
+                    "header": {
+                        "title": "🤖 Trợ Lý KHO Sapo",
+                        "subtitle": "Chuyên gia kỹ thuật Sapo 24/7"
+                    },
+                    "sections": [
+                        {
+                            "widgets": [
+                                {
+                                    "textParagraph": {
+                                        "text": html_content
+                                    }
+                                }
+                            ]
                         }
-                    }
-                ]
+                    ]
+                }
             }
         ]
     }
 
-def build_simple_gcard_v1(title_text: str, message_text: str) -> dict:
+def build_simple_text_message(msg: str) -> dict:
     return {
-        "header": {
-            "title": title_text,
-            "subtitle": "Trợ Lý KHO Sapo"
-        },
-        "sections": [
-            {
-                "widgets": [
-                    {
-                        "textParagraph": {
-                            "text": message_text
-                        }
-                    }
-                ]
-            }
-        ]
+        "text": f"🤖 *Trợ Lý KHO Sapo*\n\n{msg}"
     }
 
 def build_system_prompt(knowledge_context: str, role: str) -> str:
@@ -319,7 +319,7 @@ async def generate_gemini_stream(system_instruction: str, messages: list):
         yield f"❌ Lỗi AI: {str(err)}"
 
 # ==========================================
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - PURE CARD V1
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - STRICT PROTOBUF MESSAGE
 # ==========================================
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -329,7 +329,7 @@ async def google_chat_webhook(request: Request):
 
         if event_type == "ADDED_TO_SPACE":
             return JSONResponse(
-                content=build_simple_gcard_v1("🤖 Trợ Lý KHO Sapo", "👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ câu hỏi kỹ thuật để em hỗ trợ ngay 24/7!"),
+                content=build_simple_text_message("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ câu hỏi kỹ thuật để em hỗ trợ ngay 24/7!"),
                 headers={"Content-Type": "application/json; charset=utf-8"}
             )
 
@@ -340,25 +340,25 @@ async def google_chat_webhook(request: Request):
             quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
             if not cleaned_message or cleaned_message.lower() in quick_greetings:
                 return JSONResponse(
-                    content=build_simple_gcard_v1("👋 Trợ Lý KHO Sapo", "Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"),
+                    content=build_simple_text_message("👋 Xin chào! Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"),
                     headers={"Content-Type": "application/json; charset=utf-8"}
                 )
 
             _, raw_matches = get_high_precision_knowledge(cleaned_message, role="Sale")
-            pure_card = build_pure_gcard_v1(raw_matches)
+            gchat_payload = build_valid_gchat_message(raw_matches)
 
             return JSONResponse(
-                content=pure_card,
+                content=gchat_payload,
                 headers={"Content-Type": "application/json; charset=utf-8"}
             )
 
     except Exception:
         return JSONResponse(
-            content=build_simple_gcard_v1("🤖 Trợ Lý KHO Sapo", "Hệ thống đã nhận thông tin. Anh/chị cần tra cứu thiết bị nào ạ?"),
+            content=build_simple_text_message("👋 Hệ thống đã nhận thông tin. Anh/chị cần tra cứu thiết bị nào ạ?"),
             headers={"Content-Type": "application/json; charset=utf-8"}
         )
 
     return JSONResponse(
-        content=build_simple_gcard_v1("🤖 Trợ Lý KHO Sapo", "OK"),
+        content=build_simple_text_message("OK"),
         headers={"Content-Type": "application/json; charset=utf-8"}
     )
