@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Debug Engine", version="151.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Force Engine", version="151.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -74,7 +74,7 @@ async def load_sheet_data_async():
 
 @app.get("/")
 def health_check():
-    return {"status": "healthy", "version": "151.0", "gemini_model": GEMINI_MODEL}
+    return {"status": "healthy", "version": "151.1", "gemini_model": GEMINI_MODEL}
 
 @app.get("/reload")
 async def reload_data():
@@ -145,10 +145,14 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
 
 async def call_gemini_api_debug(system_prompt: str, user_msg: str) -> str:
     if not GEMINI_API_KEY:
-        return "⚠️ Lỗi: Chưa cấu hình GEMINI_API_KEY trong biến môi trường Cloud Run."
+        return "⚠️ Lỗi: Chưa cấu hình GEMINI_API_KEY."
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    headers = {"Content-Type": "application/json"}
+    # Truyền đồng thời cả Header x-goog-api-key để xử lý khóa AQ.
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+    }
     payload = {
         "systemInstruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
@@ -161,10 +165,9 @@ async def call_gemini_api_debug(system_prompt: str, user_msg: str) -> str:
             data = res.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]
         else:
-            # HIỆN TRỰC TIẾP MÃ LỖI TỪ GOOGLE
-            return f"⚠️ Google API Trả Về Lỗi [HTTP {res.status_code}]: {res.text[:250]}"
+            return f"⚠️ Google API Lỗi HTTP [{res.status_code}]: {res.text[:200]}"
     except Exception as e:
-        return f"⚠️ Lỗi Kết Nối Python Exception: {str(e)}"
+        return f"⚠️ Lỗi Python: {str(e)}"
 
 def wrap_gsuite_addon_response(text_message: str) -> dict:
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', text_message)
@@ -185,9 +188,9 @@ async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
     clean_q = re.sub(r'[^\w\s]', '', latest_msg.lower()).strip()
     
-    # ⚡ XỬ LÝ CÂU CHÀO OFFLINE 100% - KHÔNG CẦN GỌI GOOGLE API
-    quick_greetings = ["chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe"]
-    if clean_q in quick_greetings or any(g in clean_q for g in ["chao", "chào"]):
+    # ⚡ CÂU CHÀO OFFLINE 100% - KHÔNG CẦN GỌI AI
+    quick_greetings = ["chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
+    if clean_q in quick_greetings or "chào" in clean_q or "chao" in clean_q:
         async def greeting_gen():
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
@@ -212,9 +215,9 @@ async def google_chat_webhook(request: Request):
         if event_type == "ADDED_TO_SPACE":
             return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay!"))
 
-        quick_greetings = ["chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe"]
+        quick_greetings = ["chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
         if not cleaned_message or cleaned_message.lower() in quick_greetings or "chào" in cleaned_message.lower():
-            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em me là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"))
+            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"))
 
         focused_knowledge = get_high_precision_knowledge(cleaned_message, role="Sale")
         system_instruction = f"Bạn là Trợ Lý KHO Sapo. Trả lời ngắn gọn, dùng gạch đầu dòng.\n\nKHO DỮ LIỆU:\n{focused_knowledge}"
