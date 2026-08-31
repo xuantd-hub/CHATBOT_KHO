@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Standard Engine", version="135.0")
+app = FastAPI(title="Trợ Lý KHO Sapo GSuite Addon Engine", version="137.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,8 +68,7 @@ async def discover_active_groq_model():
             preferred_order = [
                 "llama-3.3-70b-versatile",
                 "llama-3.1-8b-instant",
-                "llama3-8b-8192",
-                "llama3-70b-8192"
+                "llama3-8b-8192"
             ]
             for pref in preferred_order:
                 if pref in model_ids:
@@ -112,20 +111,6 @@ def health_check():
 async def reload_data():
     return await load_sheet_data_async()
 
-class SaleAuthRequest(BaseModel):
-    email: str
-    passcode: str
-
-@app.post("/verify-sale")
-def verify_sale(req: SaleAuthRequest):
-    email = req.email.strip().lower()
-    passcode = req.passcode.strip()
-    if not email.endswith("@sapo.vn"):
-        return {"success": False, "message": "Email phải có đuôi @sapo.vn!"}
-    if passcode == SALE_SECRET_KEY:
-        return {"success": True, "message": "Xác thực Sale thành công!"}
-    return {"success": False, "message": "Mật khẩu nội bộ chưa chính xác!"}
-
 class ChatRequest(BaseModel):
     messages: list
     role: str = "Khach_Hang"
@@ -160,76 +145,36 @@ def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
             if value: knowledge_text += f"- {key}: {value}\n"
     return knowledge_text, [item[2] for item in top_matches]
 
-def build_valid_gchat_message(matches: list) -> dict:
-    """ Đóng gói JSON chuẩn 100% theo Google Chat API Message Resource Schema """
-    text_items = []
-    plain_items = ["🤖 Trợ Lý KHO Sapo:\n"]
+def format_clean_text_for_gchat(matches: list) -> str:
+    response_lines = ["🤖 *Trợ Lý KHO Sapo*:\n"]
     for row in matches[:2]:
         dev_name = row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", "Thiết bị Sapo"))
         guide = row.get("Noi_Dung_Huong_Dan", row.get("Cach_Khac_Phuc", row.get("Mo_Ta_Loi", row.get("Mo_Ta", ""))))
         driver = row.get("Link_Driver", row.get("Link_Video", ""))
 
-        item_str = f"<b>📌 Thiết bị: {dev_name}</b><br>"
-        plain_str = f"📌 Thiết bị: {dev_name}\n"
+        response_lines.append(f"📌 *Thiết bị:* {dev_name}")
         if guide:
-            clean_guide = guide.replace("\n", "<br>")
-            item_str += f"• Hướng dẫn: {clean_guide}<br>"
-            plain_str += f"• Hướng dẫn: {guide}\n"
+            response_lines.append(f"• *Hướng dẫn:* {guide}")
         if driver:
-            clean_driver = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'<a href="\2">\1</a>', driver)
-            if not re.search(r'<a href=', clean_driver) and driver.startswith("http"):
-                clean_driver = f'<a href="{driver}">{driver}</a>'
-            item_str += f"• Link tài nguyên: {clean_driver}<br>"
-            plain_str += f"• Link: {driver}\n"
-        text_items.append(item_str)
-        plain_items.append(plain_str)
+            clean_driver = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', driver)
+            response_lines.append(f"• *Link tài nguyên:* {clean_driver}")
+        response_lines.append("")
+    
+    return "\n".join(response_lines).strip()
 
-    html_content = "<br>".join(text_items).strip()
-    plain_text = "\n".join(plain_items).strip()
-
-    # Cấu trúc Root chỉ chứa 'text' và 'cardsV2' đúng chuẩn Google Chat API
+def wrap_gsuite_addon_response(text_message: str) -> dict:
+    """ Đóng gói JSON chuẩn 100% cho luồng gsuiteaddons.googleapis.com """
     return {
-        "text": plain_text,
-        "cardsV2": [
-            {
-                "cardId": "sapo_kho_card",
-                "card": {
-                    "header": {
-                        "title": "🤖 Trợ Lý KHO Sapo",
-                        "subtitle": "Chuyên gia kỹ thuật Sapo 24/7"
-                    },
-                    "sections": [
-                        {
-                            "widgets": [
-                                {
-                                    "textParagraph": {
-                                        "text": html_content
-                                    }
-                                }
-                            ]
-                        }
-                    ]
+        "hostAppDataAction": {
+            "chatDataAction": {
+                "createMessageAction": {
+                    "message": {
+                        "text": text_message
+                    }
                 }
             }
-        ]
+        }
     }
-
-def build_simple_text_message(msg: str) -> dict:
-    return {
-        "text": f"🤖 *Trợ Lý KHO Sapo*\n\n{msg}"
-    }
-
-def build_system_prompt(knowledge_context: str, role: str) -> str:
-    return f"""
-    Bạn là Trợ Lý KHO Sapo – Chuyên gia tư vấn kỹ thuật phần cứng Sapo.
-    QUY TẮC PHẢN HỒI:
-    1. KHÔNG TỰ VẼ BẢNG RÁC KHÔNG CÓ TRONG DỮ LIỆU.
-    2. Liệt kê phương pháp gạch đầu dòng rõ ràng.
-    3. Đính kèm link Markdown `[Tên](URL)`.
-    4. Xưng "Trợ Lý KHO". Dùng `➔` chỉ hướng.
-    DỮ LIỆU:
-    {knowledge_context}
-    """
 
 # ==========================================
 # 1. CỔNG WEB VERCEL (/chat)
@@ -244,16 +189,14 @@ async def chat_stream(req: ChatRequest):
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
-    focused_knowledge, raw_matches = get_high_precision_knowledge(latest_msg, req.role)
-    system_instruction = build_system_prompt(focused_knowledge, req.role)
+    focused_knowledge, _ = get_high_precision_knowledge(latest_msg, req.role)
+    system_instruction = f"Bạn là Trợ Lý KHO Sapo. Trả lời rành mạch, gạch đầu dòng, kèm link Markdown.\nDỮ LIỆU:\n{focused_knowledge}"
 
     if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
-        messages_payload = [{"role": "system", "content": system_instruction}]
-        trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
-        for m in trimmed:
-            role_type = "user" if m["role"] == "user" else "assistant"
-            messages_payload.append({"role": role_type, "content": m["text"]})
-
+        messages_payload = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": latest_msg}
+        ]
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
         payload = {
@@ -282,44 +225,12 @@ async def chat_stream(req: ChatRequest):
                         return
             except Exception: pass
 
-            async for chunk in generate_gemini_stream(system_instruction, req.messages):
-                yield chunk
+        return StreamingResponse(generate_groq(), media_type="text/plain")
 
-        return StreamingResponse(generate_groq(), media_type="text/plain", headers={"Cache-Control": "no-cache"})
-
-    return StreamingResponse(generate_gemini_stream(system_instruction, req.messages), media_type="text/plain", headers={"Cache-Control": "no-cache"})
-
-async def generate_gemini_stream(system_instruction: str, messages: list):
-    trimmed_messages = messages[-5:] if len(messages) > 5 else messages
-    gemini_contents = []
-    for m in trimmed_messages:
-        role_type = "user" if m["role"] == "user" else "model"
-        gemini_contents.append({"role": role_type, "parts": [{"text": m["text"]}]})
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?key={GEMINI_API_KEY}&alt=sse"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "systemInstruction": {"parts": [{"text": system_instruction}]},
-        "contents": gemini_contents,
-        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 1000}
-    }
-    try:
-        async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload) as response:
-            if response.status_code == 200:
-                async for line in response.aiter_lines():
-                    if line and line.startswith("data: "):
-                        data_str = line[6:]
-                        try:
-                            data_json = json.loads(data_str)
-                            if "candidates" in data_json and len(data_json["candidates"]) > 0:
-                                chunk = data_json["candidates"][0]["content"]["parts"][0].get("text", "")
-                                if chunk: yield chunk
-                        except Exception: pass
-    except Exception as err:
-        yield f"❌ Lỗi AI: {str(err)}"
+    return StreamingResponse(iter(["❌ Dữ liệu chưa sẵn sàng"]), media_type="text/plain")
 
 # ==========================================
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - STRICT PROTOBUF MESSAGE
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - GSUITE ADDON DATA ACTION WRAPPER
 # ==========================================
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -328,10 +239,8 @@ async def google_chat_webhook(request: Request):
         event_type = event.get("type", "")
 
         if event_type == "ADDED_TO_SPACE":
-            return JSONResponse(
-                content=build_simple_text_message("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ câu hỏi kỹ thuật để em hỗ trợ ngay 24/7!"),
-                headers={"Content-Type": "application/json; charset=utf-8"}
-            )
+            msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ câu hỏi để em hỗ trợ ngay 24/7!"
+            return JSONResponse(content=wrap_gsuite_addon_response(msg))
 
         if event_type == "MESSAGE":
             user_message = event.get("message", {}).get("text", "")
@@ -339,26 +248,16 @@ async def google_chat_webhook(request: Request):
 
             quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
             if not cleaned_message or cleaned_message.lower() in quick_greetings:
-                return JSONResponse(
-                    content=build_simple_text_message("👋 Xin chào! Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"),
-                    headers={"Content-Type": "application/json; charset=utf-8"}
-                )
+                msg = "👋 Xin chào! Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"
+                return JSONResponse(content=wrap_gsuite_addon_response(msg))
 
             _, raw_matches = get_high_precision_knowledge(cleaned_message, role="Sale")
-            gchat_payload = build_valid_gchat_message(raw_matches)
+            safe_text = format_clean_text_for_gchat(raw_matches)
 
-            return JSONResponse(
-                content=gchat_payload,
-                headers={"Content-Type": "application/json; charset=utf-8"}
-            )
+            return JSONResponse(content=wrap_gsuite_addon_response(safe_text))
 
     except Exception:
-        return JSONResponse(
-            content=build_simple_text_message("👋 Hệ thống đã nhận thông tin. Anh/chị cần tra cứu thiết bị nào ạ?"),
-            headers={"Content-Type": "application/json; charset=utf-8"}
-        )
+        msg = "👋 Trợ Lý KHO Sapo đã nhận thông tin. Anh/chị cần tra cứu thiết bị nào ạ?"
+        return JSONResponse(content=wrap_gsuite_addon_response(msg))
 
-    return JSONResponse(
-        content=build_simple_text_message("OK"),
-        headers={"Content-Type": "application/json; charset=utf-8"}
-    )
+    return JSONResponse(content=wrap_gsuite_addon_response("OK"))
