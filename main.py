@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from google import genai
 from google.genai import types
 
-app = FastAPI(title="Trợ Lý KHO Sapo GenAI SDK Engine", version="141.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Auto-Discovery Engine", version="141.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,11 +23,12 @@ app.add_middleware(
 
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip() # Để trống để hệ thống tự quét
 SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
 
-# Khởi tạo GenAI Client chính thức (hỗ trợ hoàn hảo khóa AQ. mới nhất)
 genai_client = None
+ACTIVE_GEMINI_MODEL = "gemini-1.5-flash" # Giá trị mặc định an toàn
+
 if GEMINI_API_KEY:
     try:
         genai_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -54,12 +55,52 @@ async def startup_event():
         timeout=httpx.Timeout(12.0, read=15.0),
         limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
     )
+    # Tự động dò tìm model đang hoạt động giống như Groq trước đây
+    await discover_active_gemini_model()
+    # Tải dữ liệu ngầm để mở cổng 8080 ngay lập tức, chống timeout Cloud Run
     asyncio.create_task(load_sheet_data_async())
 
 @app.on_event("shutdown")
 async def shutdown_event():
     if HTTP_CLIENT:
         await HTTP_CLIENT.aclose()
+
+async def discover_active_gemini_model():
+    global ACTIVE_GEMINI_MODEL
+    if GEMINI_MODEL:
+        ACTIVE_GEMINI_MODEL = GEMINI_MODEL
+        return
+    if not genai_client:
+        return
+
+    try:
+        # Tự động quét danh sách các model mà API Key của anh có quyền truy cập
+        models_pager = genai_client.models.list()
+        model_names = [m.name for m in models_pager if m.name]
+        
+        preferred_order = [
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+            "gemini-2.0-flash-lite"
+        ]
+        
+        for pref in preferred_order:
+            for name in model_names:
+                if pref in name:
+                    ACTIVE_GEMINI_MODEL = name.replace("models/", "")
+                    return
+                    
+        # Nếu tìm thấy bất kỳ model flash nào khác
+        for name in model_names:
+            if "flash" in name.lower():
+                ACTIVE_GEMINI_MODEL = name.replace("models/", "")
+                return
+                
+        if model_names:
+            ACTIVE_GEMINI_MODEL = model_names[0].replace("models/", "")
+    except Exception:
+        pass
 
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
@@ -85,7 +126,7 @@ async def load_sheet_data_async():
 
 @app.get("/")
 def health_check():
-    return {"status": "healthy", "provider": "Google GenAI SDK", "gemini_model": GEMINI_MODEL}
+    return {"status": "healthy", "provider": "Google GenAI Auto-Discovery", "active_model": ACTIVE_GEMINI_MODEL}
 
 @app.get("/reload")
 async def reload_data():
@@ -171,7 +212,7 @@ def call_genai_sync(system_prompt: str, user_msg: str) -> str:
         return "👋 Dạ em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thiết bị nào ạ?"
     try:
         response = genai_client.models.generate_content(
-            model=GEMINI_MODEL,
+            model=ACTIVE_GEMINI_MODEL,
             contents=user_msg,
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
@@ -216,7 +257,7 @@ async def chat_stream(req: ChatRequest):
     async def generate_genai_stream():
         try:
             response_stream = genai_client.models.generate_content_stream(
-                model=GEMINI_MODEL,
+                model=ACTIVE_GEMINI_MODEL,
                 contents=latest_msg,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
