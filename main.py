@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Super Intelligent Engine", version="170.1")
+app = FastAPI(title="Trợ Lý KHO Sapo Master Engine", version="180.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH BIẾN MÔI TRƯỜNG (CHUẨN XÁC MODEL GEMINI 3.6 FLASH)
+# CẤU HÌNH BIẾN MÔI TRƯỜNG
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
@@ -42,7 +42,7 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO VÀ ĐỒNG BỘ DỮ LIỆU
+# KHỞI TẠO VÀ TỰ ĐỘNG CHỌN MODEL GROQ CHUẨN CHAT
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
@@ -71,19 +71,21 @@ async def discover_active_groq_model():
         if res.status_code == 200:
             models_data = res.json().get("data", [])
             model_ids = [m["id"] for m in models_data]
+            
+            # Ưu tiên các model chat mạnh nhất của Groq (bỏ qua prompt-guard/eval)
             preferred_order = [
                 "llama-3.3-70b-versatile",
-                "llama-3.1-8b-instant",
-                "llama3-8b-8192"
+                "openai/gpt-oss-120b",
+                "llama-3.1-8b-instant"
             ]
             for pref in preferred_order:
                 if pref in model_ids:
                     ACTIVE_GROQ_MODEL = pref
                     return
-            if model_ids:
-                ACTIVE_GROQ_MODEL = model_ids[0]
     except Exception:
         pass
+
+    ACTIVE_GROQ_MODEL = "llama-3.3-70b-versatile"
 
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
@@ -111,7 +113,7 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "170.0",
+        "version": "180.0",
         "active_groq_model": ACTIVE_GROQ_MODEL,
         "backup_gemini_model": GEMINI_MODEL
     }
@@ -125,7 +127,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# TRÍCH XUẤT NỘI DUNG VÀ TÌM KIẾM TRI THỨC KHO
+# HÀM BÓC TÁCH & GHÉP NGỮ CẢNH TÌM KIẾM ĐA LƯỢT
 # ------------------------------------------------------------------------------
 def extract_user_text(event: dict) -> str:
     if isinstance(event.get("message"), dict):
@@ -186,6 +188,19 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
             if value: knowledge_text += f"- {key}: {value}\n"
     return knowledge_text
 
+def clean_thinking_process(text: str) -> str:
+    """ Loại bỏ đoạn suy nghĩ Tiếng Anh (Thinking Process) của các model reasoning """
+    if "Here's a thinking process:" in text:
+        parts = text.split("Here's a thinking process:")
+        last_part = parts[-1]
+        # Tìm vị trí câu trả lời thực sự bằng Tiếng Việt
+        match = re.search(r'(Dạ\s+|Xin chào|Trợ Lý KHO|\*\*|1\.|- )', last_part)
+        if match:
+            return last_part[match.start():].strip()
+    
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    return text.strip()
+
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
 Bạn là Trợ Lý KHO Sapo – Chuyên gia IT cao cấp hỗ trợ kỹ thuật thiết bị Sapo cực kỳ THÔNG MINH, TINH TẾ và LỊCH SỰ. Bạn phải thông minh, linh hoạt, biết tư duy liên kết dữ liệu.
@@ -209,6 +224,7 @@ Bạn là Trợ Lý KHO Sapo – Chuyên gia IT cao cấp hỗ trợ kỹ thuậ
        - **ĐƯỢC PHÉP:** Sử dụng tri thức IT chung của bạn để giải thích cặn kẽ các thao tác trên máy tính (cách vào Control Panel, giải nén file, cấu hình IP).
        - Phải biết liên kết dữ liệu , đọc dữ liệu từ các file đi kèm như google doc , google sheet, pdf, video... có các dữ liệu liên quan, chắt lọc trả lời chính xác, hay nhớ tuyệt đố chính xác.
     2. **LUẬT THÉP CHỐNG BỊA ĐẶT (CẤM TUYỆT ĐỐI KHÔNG ĐƯỢC PHẠM):**
+       - TRẢ LỜI 100% BẰNG TIẾNG VIỆT**. TUYỆT ĐỐI KHÔNG xuất ra các đoạn suy nghĩ Tiếng Anh như "Here's a thinking process", "Analyze User Input", "Check Rules".
        - KHÔNG TỰ BỊA RA ĐƯỜNG LINK (URL) VÀ SỐ ĐIỆN THOẠI HỖ TRỢ.
        - Chỉ được phép cung cấp Link Driver / Tài liệu nếu Link đó CÓ TRONG mục "KHO DỮ LIỆU" bên dưới.
        - Nếu trong dữ liệu không có Link, hãy chỉ hướng dẫn thao tác phần mềm, tuyệt đối không bịa link giả dạng sapo.vn/xxx.
@@ -231,7 +247,6 @@ Bạn là Trợ Lý KHO Sapo – Chuyên gia IT cao cấp hỗ trợ kỹ thuậ
     KHO DỮ LIỆU GỐC CỦA SAPO (Chỉ lấy thông số & Link từ đây):
     {knowledge_context}
     """
-
 
 # ------------------------------------------------------------------------------
 # HÀM GỌI GEMINI 3.6 FLASH DỰ PHÒNG
@@ -256,7 +271,8 @@ async def call_gemini_with_retry(system_instruction: str, user_message: str) -> 
             res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=12.0)
             if res.status_code == 200:
                 data = res.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
+                raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                return clean_thinking_process(raw_text)
             elif res.status_code in [503, 429]:
                 await asyncio.sleep(1.0)
                 continue
@@ -282,7 +298,8 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
             res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=12.0)
             if res.status_code == 200:
                 data = res.json()
-                return data["choices"][0]["message"]["content"]
+                raw_text = data["choices"][0]["message"]["content"]
+                return clean_thinking_process(raw_text)
         except Exception:
             pass
 
@@ -316,7 +333,11 @@ async def chat_stream(req: ChatRequest):
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
-    focused_knowledge = get_high_precision_knowledge(latest_msg, req.role)
+    # ⚡ ĐIỂM SỬA QUAN TRỌNG: Ghép 3 câu nói gần nhất để KHÔNG BỊ MẤT TÊN MÁY (VD: SPR02) ở câu thứ 2
+    user_msgs = [m["text"] for m in req.messages if m.get("role") in ["user", "Khach_Hang"]]
+    combined_query = " ".join(user_msgs[-3:]) if user_msgs else latest_msg
+
+    focused_knowledge = get_high_precision_knowledge(combined_query, req.role)
     system_instruction = build_smart_system_prompt(focused_knowledge)
 
     async def generate_response_stream():
@@ -359,7 +380,7 @@ async def chat_stream(req: ChatRequest):
                             return
             except Exception: pass
 
-        # 2. DỰ PHÒNG SANG GEMINI 3.6 FLASH (NẾU GROQ KHÔNG TRẢ CHỮ NÀO)
+        # 2. DỰ PHÒNG GEMINI 3.6 FLASH
         if not has_yielded:
             fallback_ans = await call_gemini_with_retry(system_instruction, latest_msg)
             yield fallback_ans
