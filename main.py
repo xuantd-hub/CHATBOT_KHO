@@ -9,10 +9,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from google import genai
-from google.genai import types
 
-app = FastAPI(title="Trợ Lý KHO Sapo Auto-Discovery Engine", version="141.1")
+app = FastAPI(title="Trợ Lý KHO Sapo Final Engine", version="150.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,17 +21,7 @@ app.add_middleware(
 
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip() # Để trống để hệ thống tự quét
-SALE_SECRET_KEY = os.getenv("SALE_SECRET_KEY", "sapo2026").strip()
-
-genai_client = None
-ACTIVE_GEMINI_MODEL = "gemini-3.6-flash" # Giá trị mặc định an toàn
-
-if GEMINI_API_KEY:
-    try:
-        genai_client = genai.Client(api_key=GEMINI_API_KEY)
-    except Exception:
-        pass
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
 
 RAM_CACHE = {}
 
@@ -52,55 +40,15 @@ HTTP_CLIENT: httpx.AsyncClient = None
 async def startup_event():
     global HTTP_CLIENT
     HTTP_CLIENT = httpx.AsyncClient(
-        timeout=httpx.Timeout(12.0, read=15.0),
+        timeout=httpx.Timeout(10.0, read=12.0),
         limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
     )
-    # Tự động dò tìm model đang hoạt động giống như Groq trước đây
-    await discover_active_gemini_model()
-    # Tải dữ liệu ngầm để mở cổng 8080 ngay lập tức, chống timeout Cloud Run
     asyncio.create_task(load_sheet_data_async())
 
 @app.on_event("shutdown")
 async def shutdown_event():
     if HTTP_CLIENT:
         await HTTP_CLIENT.aclose()
-
-async def discover_active_gemini_model():
-    global ACTIVE_GEMINI_MODEL
-    if GEMINI_MODEL:
-        ACTIVE_GEMINI_MODEL = GEMINI_MODEL
-        return
-    if not genai_client:
-        return
-
-    try:
-        # Tự động quét danh sách các model mà API Key của anh có quyền truy cập
-        models_pager = genai_client.models.list()
-        model_names = [m.name for m in models_pager if m.name]
-        
-        preferred_order = [
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "gemini-2.0-flash-lite"
-        ]
-        
-        for pref in preferred_order:
-            for name in model_names:
-                if pref in name:
-                    ACTIVE_GEMINI_MODEL = name.replace("models/", "")
-                    return
-                    
-        # Nếu tìm thấy bất kỳ model flash nào khác
-        for name in model_names:
-            if "flash" in name.lower():
-                ACTIVE_GEMINI_MODEL = name.replace("models/", "")
-                return
-                
-        if model_names:
-            ACTIVE_GEMINI_MODEL = model_names[0].replace("models/", "")
-    except Exception:
-        pass
 
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
@@ -126,7 +74,7 @@ async def load_sheet_data_async():
 
 @app.get("/")
 def health_check():
-    return {"status": "healthy", "provider": "Google GenAI Auto-Discovery", "active_model": ACTIVE_GEMINI_MODEL}
+    return {"status": "healthy", "version": "150.0", "gemini_model": GEMINI_MODEL}
 
 @app.get("/reload")
 async def reload_data():
@@ -195,34 +143,30 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
             if value: knowledge_text += f"- {key}: {value}\n"
     return knowledge_text
 
-def build_smart_system_prompt(knowledge_context: str) -> str:
-    return f"""
-    Bạn là Trợ Lý KHO Sapo – Chuyên gia IT cao cấp hỗ trợ kỹ thuật thiết bị Sapo. Bạn phải thông minh, linh hoạt, biết tư duy liên kết dữ liệu.
+async def call_gemini_api(system_prompt: str, user_msg: str) -> str:
+    if not GEMINI_API_KEY:
+        return "👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thiết bị hay cài đặt nào ạ?"
 
-    🎯 QUY TẮC PHẢN HỒI:
-    1. Tư duy liên kết, hướng dẫn ngắn gọn, trực diện, thân thiện. Xưng "Em", gọi "Anh/chị". Dùng gạch đầu dòng, in đậm bước quan trọng.
-    2. LUẬT THÉP CHỐNG BỊA ĐẶT: CẤM tuyệt đối bịa ra đường link website hoặc số điện thoại. Chỉ cung cấp Link nếu Link đó CÓ TRONG kho dữ liệu bên dưới.
-
-    KHO DỮ LIỆU GỐC CỦA SAPO:
-    {knowledge_context}
-    """
-
-def call_genai_sync(system_prompt: str, user_msg: str) -> str:
-    if not genai_client:
-        return "👋 Dạ em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thiết bị nào ạ?"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    # TRUYỀN KHÓA AQ. QUA HEADER CHUẨN CỦA GOOGLE API
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+    }
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1000}
+    }
     try:
-        response = genai_client.models.generate_content(
-            model=ACTIVE_GEMINI_MODEL,
-            contents=user_msg,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.2,
-                max_output_tokens=1000,
-            )
-        )
-        return response.text
-    except Exception as e:
-        return f"Dạ hệ thống đang bận, anh/chị vui lòng thử lại nhé! ({str(e)[:40]})"
+        res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
+        if res.status_code == 200:
+            data = res.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception:
+        pass
+
+    return "👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số hay cài đặt thiết bị nào ạ?"
 
 def wrap_gsuite_addon_response(text_message: str) -> dict:
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', text_message)
@@ -242,37 +186,22 @@ def wrap_gsuite_addon_response(text_message: str) -> dict:
 async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
     clean_q = re.sub(r'[^\w\s]', '', latest_msg.lower()).strip()
-    quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
+    
+    # ⚡ XỬ LÝ CÂU CHÀO TỰ ĐỘNG - KHÔNG CẦN GỌI AI
+    quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe"]
     if clean_q in quick_greetings:
         async def greeting_gen():
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
     focused_knowledge = get_high_precision_knowledge(latest_msg, req.role)
-    system_instruction = build_smart_system_prompt(focused_knowledge)
+    system_instruction = f"Bạn là Trợ Lý KHO Sapo. Trả lời thân thiện, ngắn gọn, dùng gạch đầu dòng.\n\nKHO DỮ LIỆU:\n{focused_knowledge}"
 
-    if not genai_client:
-        return StreamingResponse(iter(["Dạ cấu hình GEMINI_API_KEY chưa được thiết lập."]), media_type="text/plain")
+    async def generate_stream():
+        ans = await call_gemini_api(system_instruction, latest_msg)
+        yield ans
 
-    async def generate_genai_stream():
-        try:
-            response_stream = genai_client.models.generate_content_stream(
-                model=ACTIVE_GEMINI_MODEL,
-                contents=latest_msg,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    temperature=0.2,
-                    max_output_tokens=1000,
-                )
-            )
-            for chunk in response_stream:
-                if chunk.text:
-                    yield chunk.text
-        except Exception:
-            fallback_text = call_genai_sync(system_instruction, latest_msg)
-            yield fallback_text
-
-    return StreamingResponse(generate_genai_stream(), media_type="text/plain")
+    return StreamingResponse(generate_stream(), media_type="text/plain")
 
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -282,23 +211,19 @@ async def google_chat_webhook(request: Request):
         cleaned_message = re.sub(r'<.*?>', '', user_message).replace("@Trợ Lý KHO Sapo", "").strip()
 
         event_type = event.get("type") or event.get("chat", {}).get("type") or ""
-
         if event_type == "ADDED_TO_SPACE":
-            msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!"
-            return JSONResponse(content=wrap_gsuite_addon_response(msg))
+            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay!"))
 
+        # ⚡ XỬ LÝ CÂU CHÀO TỰ ĐỘNG KHÔNG CẦN GỌI AI
         quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe"]
         if not cleaned_message or cleaned_message.lower() in quick_greetings:
-            msg = "👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"
-            return JSONResponse(content=wrap_gsuite_addon_response(msg))
+            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"))
 
         focused_knowledge = get_high_precision_knowledge(cleaned_message, role="Sale")
-        system_instruction = build_smart_system_prompt(focused_knowledge)
+        system_instruction = f"Bạn là Trợ Lý KHO Sapo. Trả lời thân thiện, ngắn gọn, dùng gạch đầu dòng.\n\nKHO DỮ LIỆU:\n{focused_knowledge}"
 
-        ai_response = call_genai_sync(system_instruction, cleaned_message)
-
+        ai_response = await call_gemini_api(system_instruction, cleaned_message)
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
     except Exception:
-        msg = "Dạ em đã nhận thông tin. Anh/chị cần tra cứu cài đặt hay khắc phục lỗi thiết bị nào ạ?"
-        return JSONResponse(content=wrap_gsuite_addon_response(msg))
+        return JSONResponse(content=wrap_gsuite_addon_response("👋 Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thiết bị nào ạ?"))
