@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Card v1 Engine", version="133.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Pure Card Engine", version="134.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -160,8 +160,8 @@ def get_high_precision_knowledge(query: str, role: str) -> tuple[str, list]:
             if value: knowledge_text += f"- {key}: {value}\n"
     return knowledge_text, [item[2] for item in top_matches]
 
-def build_google_card_v1_payload(matches: list) -> dict:
-    """ Đóng gói JSON chuẩn 100% theo google.apps.card.v1.Card Protobuf Schema """
+def build_pure_gcard_v1(matches: list) -> dict:
+    """ Tạo đối tượng Card chuẩn 100% theo google.apps.card.v1.Card Proto Schema """
     text_items = []
     for row in matches[:2]:
         dev_name = row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", "Thiết bị Sapo"))
@@ -170,20 +170,22 @@ def build_google_card_v1_payload(matches: list) -> dict:
 
         item_str = f"<b>📌 Thiết bị: {dev_name}</b><br>"
         if guide:
-            item_str += f"• Hướng dẫn: {guide}<br>"
+            clean_guide = guide.replace("\n", "<br>")
+            item_str += f"• Hướng dẫn: {clean_guide}<br>"
         if driver:
-            clean_link = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', driver)
-            item_str += f"• Link: <a href='{clean_link}'>{clean_link}</a><br>"
+            clean_driver = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'<a href="\2">\1</a>', driver)
+            if not re.search(r'<a href=', clean_driver) and driver.startswith("http"):
+                clean_driver = f'<a href="{driver}">{driver}</a>'
+            item_str += f"• Link tài nguyên: {clean_driver}<br>"
         text_items.append(item_str)
 
     html_content = "<br>".join(text_items).strip()
-    plain_text = re.sub(r'<[^>]+>', '', html_content)
 
-    # Cấu trúc Card v1 chuẩn mực
-    card_obj = {
+    # KHÔNG CHỨA THẺ 'text' Hay 'cardsV2' Ở CẤP NGOÀI
+    return {
         "header": {
             "title": "🤖 Trợ Lý KHO Sapo",
-            "subtitle": "Chuyên gia kỹ thuật thiết bị Sapo"
+            "subtitle": "Chuyên gia kỹ thuật Sapo 24/7"
         },
         "sections": [
             {
@@ -198,14 +200,21 @@ def build_google_card_v1_payload(matches: list) -> dict:
         ]
     }
 
+def build_simple_gcard_v1(title_text: str, message_text: str) -> dict:
     return {
-        "text": plain_text,
-        "header": card_obj["header"],
-        "sections": card_obj["sections"],
-        "cardsV2": [
+        "header": {
+            "title": title_text,
+            "subtitle": "Trợ Lý KHO Sapo"
+        },
+        "sections": [
             {
-                "cardId": "replyCard",
-                "card": card_obj
+                "widgets": [
+                    {
+                        "textParagraph": {
+                            "text": message_text
+                        }
+                    }
+                ]
             }
         ]
     }
@@ -310,7 +319,7 @@ async def generate_gemini_stream(system_instruction: str, messages: list):
         yield f"❌ Lỗi AI: {str(err)}"
 
 # ==========================================
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - CARD V1 COMPLIANT
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - PURE CARD V1
 # ==========================================
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -319,9 +328,8 @@ async def google_chat_webhook(request: Request):
         event_type = event.get("type", "")
 
         if event_type == "ADDED_TO_SPACE":
-            welcome_matches = [{"Ten_Thiet_Bi": "Trợ Lý KHO Sapo", "Noi_Dung_Huong_Dan": "Hãy gõ câu hỏi kỹ thuật để em hỗ trợ ngay 24/7!"}]
             return JSONResponse(
-                content=build_google_card_v1_payload(welcome_matches),
+                content=build_simple_gcard_v1("🤖 Trợ Lý KHO Sapo", "👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ câu hỏi kỹ thuật để em hỗ trợ ngay 24/7!"),
                 headers={"Content-Type": "application/json; charset=utf-8"}
             )
 
@@ -331,28 +339,26 @@ async def google_chat_webhook(request: Request):
 
             quick_greetings = ["chào", "chào bạn", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
             if not cleaned_message or cleaned_message.lower() in quick_greetings:
-                greeting_matches = [{"Ten_Thiet_Bi": "Trợ Lý KHO Sapo", "Noi_Dung_Huong_Dan": "Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"}]
                 return JSONResponse(
-                    content=build_google_card_v1_payload(greeting_matches),
+                    content=build_simple_gcard_v1("👋 Trợ Lý KHO Sapo", "Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"),
                     headers={"Content-Type": "application/json; charset=utf-8"}
                 )
 
             _, raw_matches = get_high_precision_knowledge(cleaned_message, role="Sale")
-            card_payload = build_google_card_v1_payload(raw_matches)
+            pure_card = build_pure_gcard_v1(raw_matches)
 
             return JSONResponse(
-                content=card_payload,
+                content=pure_card,
                 headers={"Content-Type": "application/json; charset=utf-8"}
             )
 
     except Exception:
-        fallback_matches = [{"Ten_Thiet_Bi": "Trợ Lý KHO Sapo", "Noi_Dung_Huong_Dan": "Hệ thống đã nhận thông tin. Bạn cần tra cứu thiết bị nào ạ?"}]
         return JSONResponse(
-            content=build_google_card_v1_payload(fallback_matches),
+            content=build_simple_gcard_v1("🤖 Trợ Lý KHO Sapo", "Hệ thống đã nhận thông tin. Anh/chị cần tra cứu thiết bị nào ạ?"),
             headers={"Content-Type": "application/json; charset=utf-8"}
         )
 
     return JSONResponse(
-        content={"text": "OK"},
+        content=build_simple_gcard_v1("🤖 Trợ Lý KHO Sapo", "OK"),
         headers={"Content-Type": "application/json; charset=utf-8"}
     )
