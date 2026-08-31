@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Super Intelligent Engine", version="160.1")
+app = FastAPI(title="Trợ Lý KHO Sapo Ultra Resilient Engine", version="160.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH BIẾN MÔI TRƯỜNG (ĐÃ CẬP NHẬT CHUẨN GEMINI 3.6 FLASH)
+# CẤU HÌNH BIẾN MÔI TRƯỜNG CHUẨN MODEL GEMINI 3.6 FLASH
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
@@ -48,7 +48,7 @@ HTTP_CLIENT: httpx.AsyncClient = None
 async def startup_event():
     global HTTP_CLIENT
     HTTP_CLIENT = httpx.AsyncClient(
-        timeout=httpx.Timeout(8.0, read=12.0),
+        timeout=httpx.Timeout(10.0, read=15.0),
         limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
     )
     asyncio.create_task(load_sheet_data_async())
@@ -111,10 +111,9 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "160.1",
+        "version": "160.3",
         "active_groq_model": ACTIVE_GROQ_MODEL,
-        "backup_gemini_model": GEMINI_MODEL,
-        "has_gemini_backup": bool(GEMINI_API_KEY)
+        "backup_gemini_model": GEMINI_MODEL
     }
 
 @app.get("/reload")
@@ -205,10 +204,45 @@ KHO DỮ LIỆU GỐC CỦA SAPO:
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI GROQ HOẶC GEMINI 3.6 FLASH DỰ PHÒNG (NON-STREAMING)
+# HÀM GỌI GEMINI (ĐÃ CHỈNH GEMINI-3.6-FLASH VÀ CÓ RETRY 503)
+# ------------------------------------------------------------------------------
+async def call_gemini_with_retry(system_instruction: str, user_message: str) -> str:
+    if not GEMINI_API_KEY:
+        return "👋 Dạ em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thiết bị nào ạ?"
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+    }
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
+        "contents": [{"role": "user", "parts": [{"text": user_message}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1000}
+    }
+
+    for attempt in range(3):
+        try:
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
+            if res.status_code == 200:
+                data = res.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            elif res.status_code == 503:
+                await asyncio.sleep(1.0)
+                continue
+            else:
+                return f"⚠️ Google API Lỗi HTTP [{res.status_code}]: {res.text[:150]}"
+        except Exception as e:
+            if attempt == 2:
+                return f"⚠️ Lỗi kết nối Python: {str(e)}"
+            await asyncio.sleep(1.0)
+
+    return "👋 Máy chủ AI đang bận tạm thời, anh/chị vui lòng thử lại sau vài giây nhé!"
+
+# ------------------------------------------------------------------------------
+# HÀM GỌI LLM TỔNG HỢP (GROQ -> GEMINI 3.6 RETRY)
 # ------------------------------------------------------------------------------
 async def call_llm_single(system_instruction: str, user_message: str) -> str:
-    # 1. ƯU TIÊN GỌI GROQ
     if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
@@ -229,27 +263,7 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
         except Exception:
             pass
 
-    # 2. DỰ PHÒNG SANG GEMINI 3.6 FLASH NẾU GROQ LỖI HOẶC KHÔNG CÓ KEY
-    if GEMINI_API_KEY:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-        headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": GEMINI_API_KEY
-        }
-        payload = {
-            "systemInstruction": {"parts": [{"text": system_instruction}]},
-            "contents": [{"role": "user", "parts": [{"text": user_message}]}],
-            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1000}
-        }
-        try:
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=6.0)
-            if res.status_code == 200:
-                data = res.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception:
-            pass
-
-    return "👋 Dạ em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số hay cài đặt thiết bị nào ạ?"
+    return await call_gemini_with_retry(system_instruction, user_message)
 
 def wrap_gsuite_addon_response(text_message: str) -> dict:
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', text_message)
@@ -266,14 +280,13 @@ def wrap_gsuite_addon_response(text_message: str) -> dict:
     }
 
 # ------------------------------------------------------------------------------
-# 1. CỔNG WEB CHAT (/chat) - STREAMING GROQ -> GEMINI 3.6 FLASH FALLBACK
+# 1. CỔNG WEB CHAT (/chat)
 # ------------------------------------------------------------------------------
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
     clean_q = re.sub(r'[^\w\s]', '', latest_msg.lower()).strip()
     
-    # ⚡ CÂU CHÀO OFFLINE TỰ ĐỘNG - TỐC ĐỘ 0 SECONDS
     quick_greetings = ["chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe"]
     if clean_q in quick_greetings or "chào" in clean_q or "chao" in clean_q:
         async def greeting_gen():
@@ -284,7 +297,6 @@ async def chat_stream(req: ChatRequest):
     system_instruction = build_smart_system_prompt(focused_knowledge)
 
     async def generate_response_stream():
-        # Thử Groq Stream
         if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
             messages_payload = [{"role": "system", "content": system_instruction}]
             trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
@@ -322,8 +334,7 @@ async def chat_stream(req: ChatRequest):
                             return
             except Exception: pass
 
-        # Nếu Groq thất bại, tự động Fallback sang Gemini 3.6 Flash
-        fallback_ans = await call_llm_single(system_instruction, latest_msg)
+        fallback_ans = await call_gemini_with_retry(system_instruction, latest_msg)
         yield fallback_ans
 
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
