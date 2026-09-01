@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Master Engine", version="200.1")
+app = FastAPI(title="Trợ Lý KHO Sapo Dynamic Engine", version="220.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH BIẾN MÔI TRƯỜNG & MODEL GEMINI-3.6-FLASH CHUẨN
+# CẤU HÌNH BIẾN MÔI TRƯỜNG
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
@@ -28,6 +28,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 
 ACTIVE_GROQ_MODEL = "llama-3.3-70b-versatile"
+AVAILABLE_GROQ_MODELS = []
+AVAILABLE_GEMINI_MODELS = []
 RAM_CACHE = {}
 
 TABS_PUBLIC = [
@@ -42,7 +44,7 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO HTTP CLIENT
+# KHỞI TẠO VÀ DÒ TÌM MODEL ĐỘNG 100% CẢ GROQ LẪN GEMINI TỪ GOOGLE API
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
@@ -52,39 +54,64 @@ async def startup_event():
         limits=httpx.Limits(max_keepalive_connections=30, max_connections=100)
     )
     asyncio.create_task(load_sheet_data_async())
-    await discover_active_groq_model()
+    await discover_active_groq_models()
+    await discover_active_gemini_models()
 
 @app.on_event("shutdown")
 async def shutdown_event():
     if HTTP_CLIENT:
         await HTTP_CLIENT.aclose()
 
-async def discover_active_groq_model():
-    global ACTIVE_GROQ_MODEL
+async def discover_active_groq_models():
+    global ACTIVE_GROQ_MODEL, AVAILABLE_GROQ_MODELS
     if not GROQ_API_KEY:
         return
 
     url = "https://api.groq.com/openai/v1/models"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
     try:
-        res = await HTTP_CLIENT.get(url, headers=headers, timeout=4.0)
+        res = await HTTP_CLIENT.get(url, headers=headers, timeout=5.0)
         if res.status_code == 200:
             models_data = res.json().get("data", [])
-            model_ids = [m["id"] for m in models_data]
+            model_ids = [m["id"] for m in models_data if "guard" not in m["id"].lower()]
+            AVAILABLE_GROQ_MODELS = model_ids
             
             preferred_order = [
                 "llama-3.3-70b-versatile",
                 "openai/gpt-oss-120b",
-                "llama-3.1-8b-instant"
+                "llama3-8b-8192",
+                "mixtral-8x7b-32768"
             ]
             for pref in preferred_order:
                 if pref in model_ids:
                     ACTIVE_GROQ_MODEL = pref
                     return
+            if model_ids:
+                ACTIVE_GROQ_MODEL = model_ids[0]
     except Exception:
         pass
 
-    ACTIVE_GROQ_MODEL = "llama-3.3-70b-versatile"
+async def discover_active_gemini_models():
+    """ Dò tìm tự động danh sách Gemini model thực tế từ Google API """
+    global AVAILABLE_GEMINI_MODELS
+    if not GEMINI_API_KEY:
+        return
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_API_KEY}"
+    try:
+        res = await HTTP_CLIENT.get(url, timeout=5.0)
+        if res.status_code == 200:
+            models_data = res.json().get("models", [])
+            valid_models = []
+            for m in models_data:
+                name = m.get("name", "").replace("models/", "")
+                methods = m.get("supportedGenerationMethods", [])
+                if "generateContent" in methods and "gemini" in name.lower():
+                    valid_models.append(name)
+            if valid_models:
+                AVAILABLE_GEMINI_MODELS = valid_models
+    except Exception:
+        pass
 
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
@@ -112,9 +139,11 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "200.0",
+        "version": "220.0",
         "active_groq_model": ACTIVE_GROQ_MODEL,
-        "backup_gemini_model": GEMINI_MODEL
+        "backup_gemini_model": GEMINI_MODEL,
+        "available_gemini_models": AVAILABLE_GEMINI_MODELS,
+        "available_groq_models": AVAILABLE_GROQ_MODELS[:5]
     }
 
 @app.get("/reload")
@@ -126,7 +155,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# HÀM BÓC TÁCH VÀ TRÍCH XUẤT NỘI DUNG
+# TRÍCH XUẤT VÀ LÀM SẠCH DỮ LIỆU
 # ------------------------------------------------------------------------------
 def extract_user_text(event: dict) -> str:
     if isinstance(event.get("message"), dict):
@@ -199,7 +228,7 @@ def clean_thinking_process(text: str) -> str:
     return text.strip()
 
 # ------------------------------------------------------------------------------
-# PROMPT HOÀN CHỈNH TẤT CẢ QUY TẮC & KỊCH BẢN
+# PROMPT CHUẨN KHO SAPO
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
@@ -262,57 +291,40 @@ Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên k
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI GEMINI API DỰ PHÒNG (TRÍCH XUẤT TỪ BẢN CODE V152.0 THÀNH CÔNG OF ANH)
+# HÀM GỌI GEMINI API VỚI DANH SÁCH MODEL DÒ TÌM ĐỘNG
 # ------------------------------------------------------------------------------
 async def call_gemini_api(system_prompt: str, user_msg: str) -> str:
     if not GEMINI_API_KEY:
-        return "⚠️ Lỗi: Chưa cấu hình GEMINI_API_KEY."
+        return "👋 Dạ em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thiết bị nào ạ?"
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY
-    }
-    payload = {
-        "systemInstruction": {"parts": [{"text": system_prompt}]},
-        "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2000}
-    }
-    
-    try:
-        res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=10.0)
-        if res.status_code == 200:
-            data = res.json()
-            raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
-            return clean_thinking_process(raw_text)
-        else:
-            return f"⚠️ Google API Lỗi HTTP [{res.status_code}]: {res.text[:200]}"
-    except Exception as e:
-        return f"⚠️ Lỗi Python: {str(e)}"
+    # Lập danh sách model ưu tiên: Model cấu hình -> Các model thực tế dò được từ Google
+    candidate_models = [GEMINI_MODEL]
+    for m in AVAILABLE_GEMINI_MODELS:
+        if m not in candidate_models:
+            candidate_models.append(m)
 
-# ------------------------------------------------------------------------------
-# HÀM GỌI GROQ INSTANT KHI DÍNH RATE LIMIT 429
-# ------------------------------------------------------------------------------
-async def call_groq_fallback_instant(system_instruction: str, user_message: str) -> str:
-    if not GROQ_API_KEY: return ""
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": "llama-3.1-8b-instant",
-        "messages": [
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": user_message}
-        ],
-        "temperature": 0.2,
-        "max_tokens": 2000
-    }
-    try:
-        res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=6.0)
-        if res.status_code == 200:
-            data = res.json()
-            return clean_thinking_process(data["choices"][0]["message"]["content"])
-    except Exception: pass
-    return ""
+    for model_name in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY
+        }
+        payload = {
+            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2000}
+        }
+        
+        try:
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
+            if res.status_code == 200:
+                data = res.json()
+                raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                return clean_thinking_process(raw_text)
+        except Exception:
+            continue
+
+    return "👋 Máy chủ AI đang tạm thời bận, anh/chị vui lòng gửi lại câu hỏi sau vài giây nhé ạ!"
 
 async def call_llm_single(system_instruction: str, user_message: str) -> str:
     if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
@@ -333,9 +345,6 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
                 data = res.json()
                 return clean_thinking_process(data["choices"][0]["message"]["content"])
         except Exception: pass
-
-    instant_ans = await call_groq_fallback_instant(system_instruction, user_message)
-    if instant_ans: return instant_ans
 
     return await call_gemini_api(system_instruction, user_message)
 
@@ -367,7 +376,6 @@ async def chat_stream(req: ChatRequest):
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
-    # GHÉP 3 CÂU NÓI GẦN NHẤT ĐỂ GIỮ NGUYÊN TÊN MÁY KHI DỰ PHÒNG SANG GEMINI
     user_msgs = [m["text"] for m in req.messages if m.get("role") in ["user", "Khach_Hang"]]
     combined_query = " ".join(user_msgs[-3:]) if user_msgs else latest_msg
 
@@ -377,7 +385,7 @@ async def chat_stream(req: ChatRequest):
     async def generate_response_stream():
         has_yielded = False
         
-        # 1. ƯU TIÊN GROQ STREAMING MODEL CHÍNH
+        # 1. THỬ GROQ STREAMING
         if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
             messages_payload = [{"role": "system", "content": system_instruction}]
             trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
@@ -414,14 +422,7 @@ async def chat_stream(req: ChatRequest):
                             return
             except Exception: pass
 
-        # 2. DỰ PHÒNG TẦNG 1: GROQ INSTANT
-        if not has_yielded:
-            instant_ans = await call_groq_fallback_instant(system_instruction, combined_query)
-            if instant_ans:
-                yield instant_ans
-                return
-
-        # 3. DỰ PHÒNG TẦNG 2: GEMINI 3.6 FLASH VỚI TRỌN VẸN NGỮ CẢNH COMBINED_QUERY
+        # 2. NẾU GROQ THẤT BẠI ➔ THỬ DỰ PHÒNG GEMINI DÒ TÌM MODEL ĐỘNG
         if not has_yielded:
             fallback_ans = await call_gemini_api(system_instruction, combined_query)
             yield fallback_ans
@@ -453,4 +454,4 @@ async def google_chat_webhook(request: Request):
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
     except Exception as e:
-        return JSONResponse(content=wrap_gsuite_addon_response(f"⚠️ Lỗi Google Chat Webhook: {str(e)}"))
+        return JSONResponse(content=wrap_gsuite_addon_response(f"👋 Dạ em đã nhận thông tin. Anh/chị cần tra cứu cài đặt hay khắc phục lỗi thiết bị nào ạ?"))
