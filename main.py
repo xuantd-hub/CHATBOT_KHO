@@ -52,9 +52,14 @@ async def fetch_google_doc_content(url: str) -> str:
     if not url or "docs.google.com/document" not in url: return ""
     match = re.search(r'/document/d/([a-zA-Z0-9_-]+)', url)
     if not match: return ""
+    doc_id = match.group(1)
+    export_url = f"https://docs.google.com/document/d/{doc_id}/export?format=txt"
     try:
-        res = await HTTP_CLIENT.get(f"https://docs.google.com/document/d/{match.group(1)}/export?format=txt", timeout=10.0, follow_redirects=True)
-        if res.status_code == 200: return res.text.strip()
+        res = await HTTP_CLIENT.get(export_url, timeout=10.0, follow_redirects=True)
+        if res.status_code == 200: 
+            text_content = res.text.strip()
+            if len(text_content) > 20:
+                return text_content
     except Exception: pass
     return ""
 
@@ -239,33 +244,50 @@ def extract_user_text(event: dict) -> str:
 def get_high_precision_knowledge(query: str, role: str) -> str:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     query_lower = query.lower()
-    stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "máy", "thế", "nào", "bao", "nhiêu", "thông", "số", "in", "qua", "đã", "ok"}
-    words = [w for w in query_lower.split() if len(w) > 1 and w not in stop_words]
-    if not words: words = [query_lower]
+    
+    # 1. Trích xuất tên thiết bị từ query/lịch sử
+    known_devices = ["spr02", "spr01", "k200l", "k200u", "a868", "hprt", "spl01", "xp350b", "g8"]
+    target_device = None
+    for dev in known_devices:
+        if dev in query_lower:
+            target_device = dev
+            break
 
     scored_rows = []
     for tab in accessible_tabs:
         for row in RAM_CACHE.get(tab, []):
             row_text = " ".join(str(v).lower() for v in row.values())
+            dev_field = str(row.get("Ten_Thiet_Bi", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower()
+            
             score = 0
-            dev_name = str(row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", ""))).lower()
-            for w in words:
-                if len(w) >= 2 and w in dev_name: score += 50
-                elif w in row_text: score += 3
-            if score > 0: scored_rows.append((score, tab, row))
+            # Nếu người dùng hỏi về SPR02, dòng nào CÓ SPR02 thì cộng điểm cực cao (1000đ)
+            if target_device:
+                if target_device in dev_field:
+                    score += 1000
+                else:
+                    continue # Bỏ qua các dòng không liên quan đến máy đang hỏi
+            
+            # Tính điểm từ khóa thao tác (cài driver, máy tính, windows, ...)
+            for word in ["driver", "windows", "mac", "điện thoại", "lan", "sự cố"]:
+                if word in query_lower and word in row_text:
+                    score += 20
+            
+            if score > 0:
+                scored_rows.append((score, tab, row))
 
     scored_rows.sort(key=lambda x: x[0], reverse=True)
-    top_matches = scored_rows[:3]
+    top_matches = scored_rows[:2] # Chỉ lấy 2 dòng khớp nhất tuyệt đối
 
     knowledge_text = ""
     for score, tab, row in top_matches:
-        knowledge_text += f"\n=== DỮ LIỆU TỪ TAB [{tab}] ===\n"
+        knowledge_text += f"\n=== DỮ LIỆU CHÍNH XÁC TỪ TAB [{tab}] ===\n"
         for key, value in row.items():
             if value: 
                 knowledge_text += f"- {key}: {value}\n"
+                # Cào và bơm thẳng nội dung Doc tương ứng với dòng này
                 for res_url, res_text in MULTI_FORMAT_CACHE.items():
                     if res_url in str(value):
-                        knowledge_text += f"\n📖 [NỘI DUNG TẢI TỪ TÀI LIỆU DỮ LIỆU GỐC {res_url}]:\n{res_text}\n"
+                        knowledge_text += f"\n📖 [NỘI DUNG THỰC TẾ TRONG FILE GOOGLE DOC: {res_url}]:\n{res_text}\n"
     return knowledge_text
 
 # ------------------------------------------------------------------------------
@@ -290,13 +312,14 @@ Bạn là **Trợ Lý KHO Sapo** – Kỹ thuật viên IT cao cấp phụ trác
 2. **Nếu câu hỏi rõ ý định (VD: "cài driver máy tính", "cài in qua điện thoại", "in bị mờ"):**
    - **ƯU TIÊN TUYỆT ĐỐI NỘI DUNG CÀO ĐƯỢC:** Trích xuất chính xác từng bước, từng tên file cài đặt có trong phần "NỘI DUNG TẢI TỪ TÀI LIỆU DỮ LIỆU GỐC". Tuyệt đối CẤM tự ý đưa ra thao tác thủ công ngoài tài liệu Sapo (như Add local printer qua Control Panel).
    - **Trích xuất ĐẦY ĐỦ LINK:** Cung cấp toàn bộ các đường link có trong dữ liệu (Link Driver, Link Google Docs, Link Video YouTube...).
-
+# Bổ sung quy tắc này vào build_smart_system_prompt:
+   - CHỈ ĐƯỢC DÙNG DỮ LIỆU TỪ NỘI DUNG FILE DOC NẾU CÓ.
+   - Trích xuất toàn bộ các cột Link Driver Win, Link Driver Mac, Link Video có trong dòng dữ liệu đó ra câu trả lời
 3. **Luật thép chống bịa đặt & Định dạng:**
    - 100% Tiếng Việt. KHÔNG xuất hiện câu suy nghĩ tiếng Anh.
    - CHỈ cung cấp đường link chính xác 100% có trong KHO DỮ LIỆU BÊN DƯỚI.
    - KHÔNG dùng bảng Markdown (| ... |).
    - KHÔNG in đậm vô tội vạ từng từ lặt vặt trong câu. CHỈ in đậm tên bước (VD: *Bước 1:*), tiêu đề mục hoặc tên thiết bị.
-
 ---
 
 KHO DỮ LIỆU GỐC SAPO & NỘI DUNG TÀI LIỆU CÀO ĐƯỢC:
