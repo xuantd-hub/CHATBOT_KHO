@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Simplified Perfect Engine", version="600.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Cerebras Perfect Engine", version="800.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH BIẾN MÔI TRƯỜNG & LƯU LỊCH SỬ HỘI THOẠI
+# CẤU HÌNH CEREBRAS API & LƯU BỘ NHỚ RAM
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "").strip()
@@ -45,16 +45,16 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO HTTP CLIENT & ĐỌC DỮ LIỆU SHEET
+# KHỞI TẠO CLIENT & DÒ MODEL CEREBRAS
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
     global HTTP_CLIENT
     HTTP_CLIENT = httpx.AsyncClient(
-        timeout=httpx.Timeout(15.0, read=45.0),
+        timeout=httpx.Timeout(10.0, read=20.0),
         limits=httpx.Limits(max_keepalive_connections=30, max_connections=100)
     )
-    asyncio.create_task(load_sheet_data_async())
+    await load_sheet_data_async()
     await discover_active_cerebras_models()
 
 @app.on_event("shutdown")
@@ -66,20 +66,22 @@ async def discover_active_cerebras_models():
     global CEREBRAS_MODEL, AVAILABLE_CEREBRAS_MODELS
     if not CEREBRAS_API_KEY: return
     try:
-        res = await HTTP_CLIENT.get("https://api.cerebras.ai/v1/models", headers={"Authorization": f"Bearer {CEREBRAS_API_KEY}"}, timeout=6.0)
+        res = await HTTP_CLIENT.get("https://api.cerebras.ai/v1/models", headers={"Authorization": f"Bearer {CEREBRAS_API_KEY}"}, timeout=5.0)
         if res.status_code == 200:
             model_ids = [m["id"] for m in res.json().get("data", [])]
             AVAILABLE_CEREBRAS_MODELS = model_ids
-            if "gpt-oss-120b" in model_ids: CEREBRAS_MODEL = "gpt-oss-120b"
-            elif "gemma-4-31b" in model_ids: CEREBRAS_MODEL = "gemma-4-31b"
-            elif model_ids: CEREBRAS_MODEL = model_ids[0]
+            for pref in ["gpt-oss-120b", "llama-3.3-70b", "llama3.1-70b", "gemma-4-31b"]:
+                if pref in model_ids:
+                    CEREBRAS_MODEL = pref
+                    return
+            if model_ids: CEREBRAS_MODEL = model_ids[0]
     except Exception:
         CEREBRAS_MODEL = "gpt-oss-120b"
 
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
     try:
-        res = await HTTP_CLIENT.get(url, timeout=8.0)
+        res = await HTTP_CLIENT.get(url, timeout=6.0)
         if res.status_code == 200 and "text/csv" in res.headers.get("Content-Type", ""):
             df = pd.read_csv(io.BytesIO(res.content)).fillna("")
             records = [{str(k): str(v).strip() for k, v in row.items() if str(v).strip()} for _, row in df.iterrows()]
@@ -97,10 +99,11 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "600.0", 
+        "version": "800.0", 
+        "engine": "Cerebras Dedicated",
         "active_cerebras_model": CEREBRAS_MODEL,
-        "has_cerebras_key": bool(CEREBRAS_API_KEY),
-        "has_gemini_key": bool(GEMINI_API_KEY)
+        "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
+        "has_cerebras_key": bool(CEREBRAS_API_KEY)
     }
 
 @app.get("/reload")
@@ -112,7 +115,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# TIỆN ÍCH LÀM SẠCH VĂN BẢN
+# LÀM SẠCH CHỮ VÀ TRÍCH XUẤT CÂU HỎI
 # ------------------------------------------------------------------------------
 def clean_thinking_process(text: str) -> str:
     if "Here's a thinking process:" in text:
@@ -154,76 +157,105 @@ def extract_user_text(event: dict) -> str:
     return deep_search(event)
 
 # ------------------------------------------------------------------------------
-# TRÍCH XUẤT DỮ LIỆU TỰ NHIÊN TỪ SHEET
+# TRÍCH XUẤT DỮ LIỆU TỰ NHIÊN TỪ SHEET (RAG NHẸ & CHÍNH XÁC)
 # ------------------------------------------------------------------------------
 def get_high_precision_knowledge(query: str, role: str) -> str:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     query_lower = query.lower()
 
-    scored_rows = []
-    words = [w for w in query_lower.split() if len(w) > 1 and w not in {"mình", "cần", "cài", "cho", "với", "là", "và", "nhé", "ạ", "giúp"}]
-    if not words: words = [query_lower]
+    # Nhận diện tên thiết bị cụ thể
+    device_models = ["spr02", "spr01", "k200l", "k200u", "a868", "hprt", "80fe", "spl01", "xp350b", "g8", "a160m"]
+    detected_dev = None
+    for dev in device_models:
+        if dev in query_lower:
+            detected_dev = dev
+            break
 
+    scored_rows = []
     for tab in accessible_tabs:
         for row in RAM_CACHE.get(tab, []):
             row_text = " ".join(str(v).lower() for v in row.values())
+            dev_field = str(row.get("Ten_Thiet_Bi", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower()
+            
             score = 0
-            for w in words:
-                if w in row_text:
-                    score += 10
+            if detected_dev:
+                if detected_dev in dev_field: score += 500
+                else: continue
+            else:
+                score += 1
+
             if score > 0:
                 scored_rows.append((score, tab, row))
 
     scored_rows.sort(key=lambda x: x[0], reverse=True)
-    top_matches = scored_rows[:3]
+    top_matches = scored_rows[:2]
 
     knowledge_text = ""
     for score, tab, row in top_matches:
-        knowledge_text += f"\n=== HÃY DÙNG THÔNG TIN TỪ DÒNG NÀY ĐỂ TÓM TẮT VÀ LẤY LINK ===\n"
+        knowledge_text += f"\n=== DỮ LIỆU TỪ SHEET TAB [{tab}] ===\n"
         for key, value in row.items():
-            if value: 
-                knowledge_text += f"- {key}: {value}\n"
-
+            if value: knowledge_text += f"- {key}: {value}\n"
     return knowledge_text
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT ĐỒNG BỘ NGUYÊN BẢN NHƯ ẢNH MẪU CỦA ANH
+# SYSTEM PROMPT TỐI ƯU DÀNH RIÊNG CHO CEREBRAS (CHUẨN 100% THEO ẢNH MẪU)
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
-Bạn là **Trợ Lý KHO Sapo** – Hỗ trợ kỹ thuật phần cứng Sapo cực kỳ LỊCH SỰ, THÔNG MINH, TINH TẾ.
+Bạn là **Trợ Lý KHO Sapo** – Kỹ thuật viên hỗ trợ phần cứng Sapo cực kỳ THÔNG MINH, TINH TẾ và LỊCH SỰ.
 
-🎯 TƯ DUY PHẢN HỒI NGUYÊN BẢN CHUẨN KHO SAPO:
+🎯 QUY TẮC PHẢN HỒI BẮT BUỘC (TUÂN THỦ 100%):
 
-1. **NẾU CÂU HỎI CHƯA ĐỦ THÔNG TIN (Hoặc chưa có tên máy, chưa chọn cách cài):**
-   - Hỏi lại lịch sự để khoanh vùng nhẹ nhàng (giống hệt phong cách chào hỏi thân thiện):
-     *"Dạ, để hỗ trợ anh/chị cài đặt [Tên dịch vụ/thiết bị], em cần xác nhận thêm một chút thông tin để gửi đúng hướng dẫn nhé:*
-     *1. Anh/chị đang dùng máy in hãng nào ạ? (Ví dụ: Xprinter SPR02, K200L..., HPRT...)*
-     *2. Anh/chị muốn cài đặt theo cách nào?*
-     *   - Cách A: Cài qua App XTEST (phổ biến nhất)*
-     *   - Cách B: Cài qua máy tính kết nối LAN/USB*
-     *Anh/chị cho em biết cụ thể để em gửi link hướng dẫn chi tiết ngay ạ! 🙏"*
+📌 KỊCH BẢN 1: KHI NGƯỜI DÙNG NÓI CÂU CHUNG CHUNG / CHƯA NÓI TÊN MÁY HOẶC CHƯA CHỌN CÁCH CÀI
+(Ví dụ: "mình cần cài máy in hóa đơn trên điện thoại", "cài máy in", "hướng dẫn cài máy in"):
+👉 TUYỆT ĐỐI KHÔNG xả ra bài hướng dẫn dài dòng! Hãy trả lời CHÍNH XÁC theo khung mẫu dưới đây:
 
-2. **NẾU CÂU HỎI ĐÃ RÕ Ý ĐỊNH HOẶC NGƯỜI DÙNG ĐÃ CHỌN CÁCH CÀI (Ví dụ: "cài trên app xtest nhé", "cài driver spr02 máy tính"):**
-   - Xóa bỏ mọi sự dài dòng. Hãy đưa ra **bản tóm tắt 3-4 bước cực kỳ ngắn gọn và dễ hiểu**.
-   - BẮT BUỘC TRÍCH XUẤT VÀ ĐÍNH KÈM CÁC ĐƯỜNG LINK TRONG DỮ LIỆU BÊN DƯỚI:
-     - 📄 **Tài liệu hướng dẫn chi tiết (Văn bản):** <Link Google Doc trong dữ liệu>
-     - 🎥 **Video hướng dẫn trực quan:** <Link Video Youtube/Drive trong dữ liệu>
-     - 💻 **Link Tải Driver (nếu có):** <Link Driver Win/Mac>
+"Dạ, để hỗ trợ anh/chị cài đặt máy in hóa đơn trên điện thoại, em cần xác nhận thêm một chút thông tin để gửi hướng dẫn nhé:
 
-3. **LUẬT THÉP BẢO VỆ DỮ LIỆU:**
-   - 100% Tiếng Việt.
-   - CHỈ đính kèm link thực tế có trong KHO DỮ LIỆU. Không tự sáng tác ra các link giả.
-   - Không tự bịa ra các bước Control Panel rườm rà. Lấy đúng tinh thần hỗ trợ kỹ thuật thực chiến.
+1. **Anh/chị đang dùng máy in hãng nào ạ?** (Ví dụ: Xprinter (SPR02, K200L...), HPRT (80FE...), hay hãng khác?)
+
+2. **Anh/chị muốn cài đặt theo cách nào?**
+   - **Cách A:** Cài qua App XTEST (phổ biến nhất cho máy Xprinter).
+   - **Cách B:** Cài trực tiếp trong Cài đặt của điện thoại (Android/iOS) mà không cần tải app ngoài.
+
+👉 Ví dụ: \"Em dùng máy SPR02, muốn cài qua app XTEST\" hoặc \"Em dùng HPRT 80FE\".
+
+Anh/chị cho em biết cụ thể để em gửi link hướng dẫn chi tiết ngay ạ! 🙏"
 
 ---
 
-KHO DỮ LIỆU GỐC SAPO:
+📌 KỊCH BẢN 2: KHI NGƯỜI DÙNG ĐÃ NÓI RÕ TÊN MÁY HOẶC ĐÃ CHỌN CÁCH CÀI
+(Ví dụ: "cài trên app xtest nhé", "cài driver spr02 máy tính", "hướng dẫn cài spr02"):
+👉 Trả lời ngắn gọn, đúng trọng tâm (chỉ 3-4 bước ngắn) và TRÍCH XUẤT ĐÚNG LINK TỪ KHO DỮ LIỆU BÊN DƯỚI:
+
+"Dạ, em hỗ trợ anh/chị cài đặt in hóa đơn qua ứng dụng XTEST trên điện thoại ngay ạ.
+
+Dưới đây là các bước và tài liệu hướng dẫn chi tiết:
+
+📱 **Hướng dẫn cài đặt qua App XTEST:**
+1. **Tải ứng dụng:** Anh/chị tải app XTEST từ App Store (iOS) hoặc CH Play (Android).
+2. **Kết nối:** Mở app, chọn kết nối với máy in (thường là qua Wi-Fi hoặc Bluetooth tùy model).
+3. **Cấu hình IP:** Trong app XTEST, anh/chị cần thiết lập địa chỉ IP cho máy in để kết nối với hệ thống Sapo.
+4. **Kiểm tra:** In thử một trang test để đảm bảo máy in hoạt động bình thường.
+
+📄 **Tài liệu hướng dẫn chi tiết (Văn bản):** <Gợi ý tên tài liệu> (<Chèn Link Google Doc lấy từ dữ liệu>)
+🎥 **Video hướng dẫn trực quan:** <Gợi ý tên video> (<Chèn Link Video lấy từ dữ liệu>)
+
+Anh/chị làm theo video hoặc tài liệu trên nhé. Nếu gặp khó khăn ở bước nào, anh/chị cứ nhắn em hỗ trợ thêm ạ!"
+
+---
+
+❌ LUẬT THÉP CẤM BỊA ĐẶT:
+- TUYỆT ĐỐI CẤM tự bịa ra các bước Windows thủ công như "Control Panel -> Devices and Printers", "Add local printer", "Cutter Select", hay "Giữ nút FEED".
+- CHỈ được đính kèm link thực tế CÓ TRONG KHO DỮ LIỆU bên dưới.
+- Xưng "Em", gọi "Anh/chị".
+
+KHO DỮ LIỆU GỐC CỦA SAPO:
 {knowledge_context}
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI LLM ĐA LƯỢT
+# HÀM GỌI CEREBRAS LLM (CÓ GEMINI LÀM DỰ PHÒNG AN TOÀN)
 # ------------------------------------------------------------------------------
 async def call_llm_with_history(system_instruction: str, messages_list: list) -> str:
     messages_payload = [{"role": "system", "content": system_instruction}]
@@ -231,6 +263,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         role_type = "user" if m.get("role") in ["user", "Khach_Hang"] else "assistant"
         messages_payload.append({"role": role_type, "content": m.get("text", "")})
 
+    # 1. GỌI CEREBRAS API DEDICATED
     if CEREBRAS_API_KEY and CEREBRAS_MODEL:
         url = "https://api.cerebras.ai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"}
@@ -238,15 +271,16 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
             "model": CEREBRAS_MODEL,
             "messages": messages_payload,
             "temperature": 0.1,
-            "max_tokens": 2000
+            "max_tokens": 1200
         }
         try:
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=4.0)
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
             if res.status_code == 200:
                 data = res.json()
                 return clean_thinking_process(data["choices"][0]["message"]["content"])
         except Exception: pass
 
+    # 2. DỰ PHÒNG GEMINI (NẾU CEREBRAS MẤT MẠNG TẠM THỜI)
     if GEMINI_API_KEY:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
@@ -258,7 +292,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         payload = {
             "systemInstruction": {"parts": [{"text": system_instruction}]},
             "contents": gemini_contents,
-            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2000}
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1200}
         }
         try:
             res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
@@ -287,7 +321,7 @@ def wrap_gsuite_addon_response(text_message: str) -> dict:
     }
 
 # ------------------------------------------------------------------------------
-# 1. CỔNG WEB CHAT (/chat)
+# 1. CỔNG WEB CHAT (/chat) - CEREBRAS STREAMING
 # ------------------------------------------------------------------------------
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -307,57 +341,13 @@ async def chat_stream(req: ChatRequest):
     system_instruction = build_smart_system_prompt(focused_knowledge)
 
     async def generate_response_stream():
-        has_yielded = False
-        
-        if CEREBRAS_API_KEY and CEREBRAS_MODEL:
-            messages_payload = [{"role": "system", "content": system_instruction}]
-            trimmed = req.messages[-6:] if len(req.messages) > 6 else req.messages
-            for m in trimmed:
-                role_type = "user" if m["role"] in ["user", "Khach_Hang"] else "assistant"
-                messages_payload.append({"role": role_type, "content": m["text"]})
-
-            url = "https://api.cerebras.ai/v1/chat/completions"
-            headers = {"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"}
-            payload = {
-                "model": CEREBRAS_MODEL,
-                "messages": messages_payload,
-                "temperature": 0.1,
-                "max_tokens": 2000,
-                "stream": True
-            }
-            try:
-                cerebras_timeout = httpx.Timeout(10.0, connect=2.5)
-                full_stream_text = ""
-                async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload, timeout=cerebras_timeout) as response:
-                    if response.status_code == 200:
-                        async for line in response.aiter_lines():
-                            if line and line.startswith("data: "):
-                                data_str = line[6:].strip()
-                                if data_str == "[DONE]": break
-                                try:
-                                    data_json = json.loads(data_str)
-                                    choices = data_json.get("choices", [])
-                                    if choices:
-                                        chunk = choices[0].get("delta", {}).get("content", "")
-                                        if chunk and not chunk.startswith("<think>"):
-                                            full_stream_text += chunk
-                                except Exception: pass
-                        
-                        clean_output = clean_thinking_process(full_stream_text)
-                        if clean_output:
-                            has_yielded = True
-                            yield clean_output
-                            return
-            except Exception: pass
-
-        if not has_yielded:
-            fallback_ans = await call_llm_with_history(system_instruction, req.messages)
-            yield fallback_ans
+        ans = await call_llm_with_history(system_instruction, req.messages)
+        yield ans
 
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
 # ------------------------------------------------------------------------------
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat)
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - CEREBRAS ENGINE
 # ------------------------------------------------------------------------------
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -395,4 +385,4 @@ async def google_chat_webhook(request: Request):
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
     except Exception:
-        return JSONResponse(content=wrap_gsuite_addon_response("👋 Dạ em chào anh/chị! Em là Trợ Lý KHO Sapo. Anh/chị cần em hỗ trợ cài đặt hay tra cứu lỗi thiết bị nào ạ?"))
+        return JSONResponse(content=wrap_gsuite_addon_response("👋 Dạ em chào anh/chị! Em là Trợ Lý KHO Sapo. Anh/chị cần em hỗ trợ cài đặt hay tra cứu thiết bị nào ạ?"))
