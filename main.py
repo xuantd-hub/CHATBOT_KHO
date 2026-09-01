@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Universal Engine", version="900.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Gemma-Cerebras Engine", version="1000.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,7 +24,7 @@ app.add_middleware(
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "").strip()
-CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "gpt-oss-120b").strip()
+CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "gemma-4-31b").strip()
 AVAILABLE_CEREBRAS_MODELS = []
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
@@ -45,13 +45,13 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO CLIENT & DÒ MODEL CEREBRAS
+# KHỞI TẠO CLIENT & ƯU TIÊN MODEL GEMMA 4 TRÊN CEREBRAS
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
     global HTTP_CLIENT
     HTTP_CLIENT = httpx.AsyncClient(
-        timeout=httpx.Timeout(10.0, read=20.0),
+        timeout=httpx.Timeout(10.0, read=25.0),
         limits=httpx.Limits(max_keepalive_connections=30, max_connections=100)
     )
     await load_sheet_data_async()
@@ -70,13 +70,15 @@ async def discover_active_cerebras_models():
         if res.status_code == 200:
             model_ids = [m["id"] for m in res.json().get("data", [])]
             AVAILABLE_CEREBRAS_MODELS = model_ids
-            for pref in ["gpt-oss-120b", "llama-3.3-70b", "llama3.1-70b", "gemma-4-31b"]:
+            # Ưu tiên các dòng Gemma 4 / Gemma 31B trước
+            gemma_prefs = ["gemma-4-31b", "gemma-4-31b-it", "google/gemma-4-31b-it", "gemma-31b-it", "llama-3.3-70b"]
+            for pref in gemma_prefs:
                 if pref in model_ids:
                     CEREBRAS_MODEL = pref
                     return
             if model_ids: CEREBRAS_MODEL = model_ids[0]
     except Exception:
-        CEREBRAS_MODEL = "gpt-oss-120b"
+        CEREBRAS_MODEL = "gemma-4-31b"
 
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
@@ -99,8 +101,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "900.0", 
-        "engine": "Cerebras Dedicated Universal Engine",
+        "version": "1000.0", 
+        "engine": "Gemma-Cerebras Dedicated",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY)
@@ -115,7 +117,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# LÀM SẠCH VĂN BẢN VÀ TRÍCH XUẤT CÂU HỎI
+# LÀM SẠCH VĂN BẢN VÀ LỌC CÂU HỎI
 # ------------------------------------------------------------------------------
 def clean_thinking_process(text: str) -> str:
     if "Here's a thinking process:" in text:
@@ -173,12 +175,10 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
             row_text = " ".join(str(v).lower() for v in row.values())
             score = 0
             
-            # Tính điểm khớp từ khóa trong toàn bộ dòng
             for w in words:
                 if w in row_text:
                     score += 10
             
-            # Ưu tiên cộng điểm cao nếu khớp Tên Thiết Bị / Loại Thao Tác / Tên Lỗi / Tên Chính Sách
             key_field = str(row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", row.get("Ten_Loi", row.get("Ten_Chinh_Sach", row.get("Tu_Khoa_Nhan_Dien", "")))))).lower()
             for w in words:
                 if len(w) >= 2 and w in key_field:
@@ -200,49 +200,52 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
     return knowledge_text
 
 # ------------------------------------------------------------------------------
-# PROMPT HỆ THỐNG TỔNG QUÁT BẢO VỆ TOÀN BỘ THƯ VIỆN
+# PROMPT HỆ THỐNG ĐỢỢC TỐI ƯU CHO GEMMA 4 (TƯ DUY PHÂN TÍCH CHAIN-OF-THOUGHT)
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
-Bạn là **Trợ Lý KHO Sapo** – Chuyên gia IT cao cấp hỗ trợ Kỹ thuật, Lỗi thiết bị, Cài đặt và Chính sách của Sapo.
-Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, ngắn gọn, chính xác, tinh tế.
+Bạn là **Trợ Lý KHO Sapo** – Trợ lý AI cao cấp, có tư duy logic sâu sắc và am hiểu kỹ thuật thiết bị Sapo.
+Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghiệp, hành văn tự nhiên, rõ ràng.
 
-🎯 BỘ QUY TẮC PHÂN LOẠI Ý ĐỊNH VÀ PHẢN HỒI (ÁP DỤNG TOÀN HỆ THỐNG):
+🧠 QUY TRÌNH PHÂN TÍCH TƯ DUY (HÃY BÁM SÁT TRƯỚC KHI XUẤT CÂU TRẢ LỜI):
+- Bước 1: Kiểm tra xem câu hỏi của người dùng có bị mập mờ hoặc chỉ chứa tên thiết bị/chính sách chung chung (VD: "spr02", "bảo hành") hay không.
+- Bước 2: Kiểm tra môi trường đang hỏi (Điện thoại hay Máy tính). Tuyệt đối cấm nhầm lẫn link/ảnh của Máy tính (Windows Properties) dán vào bài viết Điện thoại (XTEST).
+- Bước 3: Chỉ trích xuất đường link CÓ THỰC trong Dữ liệu bên dưới.
+
+🎯 QUY TẮC PHẢN HỒI (TUÂN THỦ 100%):
 
 1. TRƯỜNG HỢP 1: CÂU HỎI MẬP MỜ / CHỈ NÓI TÊN THIẾT BỊ / CHỈ NÓI TÊN CHÍNH SÁCH
 (Ví dụ: "spr02", "k200l", "chính sách đổi trả", "máy in xprinter", "bảo hành"):
 👉 TUYỆT ĐỐI KHÔNG tự đoán mò nhu cầu! KHÔNG xả ngay bài hướng dẫn dài dòng hay tự ý gán kịch bản cài mobile/PC!
-👉 BẮT BUỘC hỏi lại 1 câu khoanh vùng nhu cầu tùy theo đối tượng:
+👉 BẮT BUỘC hỏi lại 1 câu khoanh vùng nhu cầu:
    - Nếu là THIẾT BỊ (Ví dụ: SPR02, K200L...):
      "Dạ, với thiết bị **[Tên thiết bị]**, anh/chị cần em hỗ trợ mục nào dưới đây ạ?
       1. 💻 Cài đặt trên Máy tính (Windows / Mac)
       2. 📱 Cài đặt trên Điện thoại / App (App XTEST / Kết nối LAN)
       3. 🛠️ Sửa lỗi kỹ thuật / Tra cứu thông số"
-   - Nếu là CHÍNH SÁCH / NỘI BỘ / LỖI CHUNG (Bảo hành, Thu hồi, Chiết khấu...):
+   - Nếu là CHÍNH SÁCH / NỘI BỘ (Bảo hành, Thu hồi, Chiết khấu...):
      "Dạ, về **[Chủ đề]**, anh/chị đang cần tra cứu quy định hoặc hướng dẫn cụ thể nào ạ?"
 
 2. TRƯỜNG HỢP 2: CÂU HỎI ĐÃ CÓ Ý ĐỊNH RÕ RÀNG
-(Ví dụ: "cài driver spr02 máy tính", "spr02 in ra giấy trắng", "chính sách bảo hành máy in 12 tháng"):
+(Ví dụ: "cài driver spr02 máy tính", "cài trên app xtest nhé", "chính sách bảo hành 12 tháng"):
 👉 Trả lời TRỰC DIỆN, tóm tắt 3-4 bước ngắn gọn, rõ ràng.
-👉 ĐÍNH KÈM TÀI LIỆU VÀ MỆNH ĐỀ MATCH 100% (MATCHING STRICT RULE):
+👉 ĐÍNH KÈM TÀI LIỆU CÓ THỰC VÀ MATCH 100%:
    - Đang hỏi CÀI TRÊN ĐIỆN THOẠI ➔ CHỈ đính kèm link/video App Mobile. TUYỆT ĐỐI CẤM gửi link Driver Win/Mac hoặc ảnh màn hình Windows Properties!
    - Đang hỏi CÀI TRÊN MÁY TÍNH ➔ CHỈ đính kèm link Driver Win/Mac & video thao tác PC.
-   - Đang hỏi SỬA LỖI ➔ CHỈ gửi hướng dẫn xử lý lỗi đó, KHÔNG đính kèm link cài đặt ban đầu.
-   - Đang hỏi CHÍNH SÁCH / NỘI BỘ ➔ Trích xuất đúng điều khoản trong Tab [3_CHINH_SACH_SAPO] hoặc [4_DU_LIEU_NOI_BO].
+   - Đang hỏi SỬA LỖI / CHÍNH SÁCH ➔ Trích xuất đúng thông tin trong Kho dữ liệu.
 
-3. LUẬT THÉP BẢO VỆ DỮ LIỆU CHỐNG HALLUCINATION:
-- KHÔNG TỰ BỊA BƯỚC THỦ CÔNG: Không tự sáng tác các bước Windows Control Panel hay thao tác phần cứng nếu trong Dữ liệu gốc không yêu cầu.
-- KHÔNG TỰ BỊA LINK: Chỉ xuất các đường URL/Drive/Youtube thực sự xuất hiện trong KHO DỮ LIỆU bên dưới. Nếu dữ liệu không có link, chỉ trả lời chữ.
-- KHÔNG LẪN LỘN MEDIA: Nếu không có hình ảnh/video khớp 100% với thao tác đang hỏi, thà KHÔNG GỬI ẢNH chứ tuyệt đối không vứt ảnh rác hoặc ảnh của thiết bị/HĐH khác vào.
+3. LUẬT THÉP CẤM BỊA ĐẶT:
+- Không tự bịa bước Control Panel hay thao tác phần cứng nếu dữ liệu không có.
+- Không tự bịa link URL giả.
 
 ---
 
-KHO DỮ LIỆU TRÍCH XUẤT TỪ SHEET (CỦA TẤT CẢ CÁC TAB):
+KHO DỮ LIỆU GỐC SAPO:
 {knowledge_context}
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI CEREBRAS LLM (CÓ GEMINI DỰ PHÒNG)
+# GỌI CEREBRAS CỚ CẤU HÌNH PARAMETERS CHUẨN (TEMP 0.6, TOP_P 0.9)
 # ------------------------------------------------------------------------------
 async def call_llm_with_history(system_instruction: str, messages_list: list) -> str:
     messages_payload = [{"role": "system", "content": system_instruction}]
@@ -250,24 +253,25 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         role_type = "user" if m.get("role") in ["user", "Khach_Hang"] else "assistant"
         messages_payload.append({"role": role_type, "content": m.get("text", "")})
 
-    # 1. GỌI CEREBRAS API DEDICATED
+    # 1. GỌI CEREBRAS API DEDICATED VỚI MODEL GEMMA 4 31B
     if CEREBRAS_API_KEY and CEREBRAS_MODEL:
         url = "https://api.cerebras.ai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"}
         payload = {
             "model": CEREBRAS_MODEL,
             "messages": messages_payload,
-            "temperature": 0.1,
-            "max_tokens": 1200
+            "temperature": 0.6,   # Tăng temp lên 0.6 giúp Gemma hành văn mượt và thông minh hơn
+            "top_p": 0.9,         # Top_p 0.9 mở rộng tư duy ngôn ngữ
+            "max_tokens": 2000
         }
         try:
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=10.0)
             if res.status_code == 200:
                 data = res.json()
                 return clean_thinking_process(data["choices"][0]["message"]["content"])
         except Exception: pass
 
-    # 2. DỰ PHÒNG GEMINI NẾU CEREBRAS GẶP SỰ CỐ TẠM THỜI
+    # 2. DỰ PHÒNG GEMINI NẾU CEREBRAS MẤT MẠNG TẠM THỜI
     if GEMINI_API_KEY:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
@@ -279,7 +283,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         payload = {
             "systemInstruction": {"parts": [{"text": system_instruction}]},
             "contents": gemini_contents,
-            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1200}
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2000}
         }
         try:
             res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
