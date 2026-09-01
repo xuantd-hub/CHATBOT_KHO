@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Cerebras Engine", version="230.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Cerebras Debug Engine", version="235.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH BIẾN MÔI TRƯỜNG & API KEYS
+# CẤU HÌNH BIẾN MÔI TRƯỜNG
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "csk-xyrjt5mej95fexmh9f9w2yprrt4wttjyrfy9pv9hc2jjv66d").strip()
@@ -84,7 +84,7 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "230.0",
+        "version": "235.0",
         "active_cerebras_model": CEREBRAS_MODEL,
         "backup_gemini_model": GEMINI_MODEL
     }
@@ -207,14 +207,13 @@ Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên k
 ### KỊCH BẢN B: XỬ LÝ SỰ CỐ / BÁO LỖI KỸ THUẬT / CẦN CÀI ĐẶT CỤ THỂ
 *(Ví dụ: "in ra giấy trắng", "cài spr02 qua điện thoại", "driver spr02")*
 - **HÀNH ĐỘNG:** Trả lời trực diện giải pháp cho thiết bị đang đề cập. Đưa ra quy trình từng bước rõ ràng và đính kèm ĐẦY ĐỦ link Driver/Tài liệu tương ứng từ Kho dữ liệu bên dưới.
-- các bước cài đặt theo chuẩn IT nhưng dựa theo cài đặt trên driver, chứ không hướng dẫn theo kiểu add máy in thủ công 
 
 ### KỊCH BẢN C: THIẾU THÔNG TIN THIẾT BỊ (ĐIỀN KHUYẾT THÔNG MINH)
 *(Ví dụ: "cài máy in hóa đơn", "in tem bị chệch")*
 - **HÀNH ĐỘNG:** 
   - Nếu trong các tin nhắn trước người dùng ĐÃ NÓI tên thiết bị: Dùng ngay tên thiết bị đó để xử lý theo Kịch bản B, TUYỆT ĐỐI KHÔNG HỎI LAI.
   - Nếu người dùng CHƯA NÓI tên thiết bị: Đưa ngay quy trình xử lý chuẩn IT chung (VD: hướng dẫn vào Control Panel > Devices and Printers) 💬 **ĐỒNG THỜI** kết bài bằng lời hỏi khéo: *"Anh/chị cho em xin tên model máy (VD: SPR02, SPL01...) để em gửi chính xác link Driver và video thao tác nhé ạ!"*
-  
+
 ### KỊCH BẢN D: THIẾU DỮ LIỆU HOẶC MÁY NGOÀI DANH MỤC
 - **HÀNH ĐỘNG:** Đưa ra hướng xử lý IT căn bản và gợi ý liên hệ tổng đài Sapo.
 
@@ -231,15 +230,14 @@ Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên k
 
 # KHO DỮ LIỆU GỐC SAPO
 {knowledge_context}
-
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI GEMINI 3.6 FLASH DỰ PHÒNG
+# HÀM GỌI GEMINI 3.6 FLASH (CÓ BÁO MÃ LỖI THẬT)
 # ------------------------------------------------------------------------------
 async def call_gemini_api(system_prompt: str, user_msg: str) -> str:
     if not GEMINI_API_KEY:
-        return "👋 Dạ em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thiết bị nào ạ?"
+        return "⚠️ Lỗi: Chưa có GEMINI_API_KEY trên Cloud Run."
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     headers = {
@@ -253,14 +251,15 @@ async def call_gemini_api(system_prompt: str, user_msg: str) -> str:
     }
     
     try:
-        res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
+        res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=10.0)
         if res.status_code == 200:
             data = res.json()
             raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
             return clean_thinking_process(raw_text)
-    except Exception: pass
-
-    return "👋 Máy chủ AI đang tạm thời bận, anh/chị vui lòng gửi lại câu hỏi sau vài giây nhé ạ!"
+        else:
+            return f"⚠️ Gemini API Lỗi HTTP [{res.status_code}]: {res.text[:150]}"
+    except Exception as e:
+        return f"⚠️ Lỗi kết nối Gemini: {str(e)}"
 
 async def call_llm_single(system_instruction: str, user_message: str) -> str:
     if CEREBRAS_API_KEY:
@@ -280,7 +279,10 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
             if res.status_code == 200:
                 data = res.json()
                 return clean_thinking_process(data["choices"][0]["message"]["content"])
-        except Exception: pass
+            else:
+                return f"⚠️ Cerebras API Lỗi HTTP [{res.status_code}]: {res.text[:150]}"
+        except Exception as e:
+            return f"⚠️ Lỗi Cerebras: {str(e)}"
 
     return await call_gemini_api(system_instruction, user_message)
 
@@ -299,7 +301,7 @@ def wrap_gsuite_addon_response(text_message: str) -> dict:
     }
 
 # ------------------------------------------------------------------------------
-# 1. CỔNG WEB CHAT (/chat) - STREAMING SIÊU TỐC TỪ CEREBRAS
+# 1. CỔNG WEB CHAT (/chat) - BÁO CỦA CEREBRAS & GEMINI
 # ------------------------------------------------------------------------------
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -320,8 +322,9 @@ async def chat_stream(req: ChatRequest):
 
     async def generate_response_stream():
         has_yielded = False
+        cerebras_err_msg = ""
         
-        # 1. THỬ CEREBRAS CLOUD STREAMING (SIÊU TỐC 1800 TOKENS/S)
+        # 1. THỬ CEREBRAS CLOUD STREAMING
         if CEREBRAS_API_KEY:
             messages_payload = [{"role": "system", "content": system_instruction}]
             trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
@@ -356,12 +359,19 @@ async def chat_stream(req: ChatRequest):
                                 except Exception: pass
                         if has_yielded:
                             return
-            except Exception: pass
+                    else:
+                        err_text = await response.aread()
+                        cerebras_err_msg = f"⚠️ Cerebras Lỗi HTTP [{response.status_code}]: {err_text.decode('utf-8', errors='ignore')[:150]}"
+            except Exception as e:
+                cerebras_err_msg = f"⚠️ Lỗi kết nối Cerebras: {str(e)}"
 
-        # 2. DỰ PHÒNG SANG GEMINI 3.6 FLASH NẾU CEREBRAS NGHỄN
+        # 2. NẾU CEREBRAS LỖI ➔ CHUYỂN SANG GEMINI 3.6 FLASH DỰ PHÒNG
         if not has_yielded:
             fallback_ans = await call_gemini_api(system_instruction, combined_query)
-            yield fallback_ans
+            if cerebras_err_msg and "⚠️" in fallback_ans:
+                yield f"{cerebras_err_msg}\n\n{fallback_ans}"
+            else:
+                yield fallback_ans
 
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
