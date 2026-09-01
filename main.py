@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Cerebras Paid Engine", version="360.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Fixed Llama-3.3-70b Engine", version="380.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,10 +20,10 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH BIẾN MÔI TRƯỜNG
+# CẤU HÌNH BIẾN MÔI TRƯỜNG (LOẠI BỎ LỘ KEY MẶC ĐỊNH)
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
-CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "csk-xyrjt5mej95fexmh9f9w2yprrt4wttjyrfy9pv9hc2jjv66d").strip()
+CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "").strip()
 CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b").strip()
 AVAILABLE_CEREBRAS_MODELS = []
 
@@ -44,7 +44,7 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO HTTP CLIENT & DÒ TÌM / XÁC NHẬN MODEL CEREBRAS
+# KHỞI TẠO HTTP CLIENT & DÒ TÌM MODEL LLAMA-3.3-70B CHUẨN
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
@@ -62,33 +62,42 @@ async def shutdown_event():
         await HTTP_CLIENT.aclose()
 
 async def discover_active_cerebras_models():
+    """ Tự động dò tìm và ưu tiên tuyệt đối cho Model ID llama-3.3-70b chuẩn """
     global CEREBRAS_MODEL, AVAILABLE_CEREBRAS_MODELS
     if not CEREBRAS_API_KEY:
+        print("🚨 LỖI: Chưa cấu hình CEREBRAS_API_KEY trong biến môi trường!")
         return
 
     url = "https://api.cerebras.ai/v1/models"
     headers = {"Authorization": f"Bearer {CEREBRAS_API_KEY}"}
     try:
-        res = await HTTP_CLIENT.get(url, headers=headers, timeout=4.0)
+        res = await HTTP_CLIENT.get(url, headers=headers, timeout=6.0)
         if res.status_code == 200:
             models_data = res.json().get("data", [])
             model_ids = [m["id"] for m in models_data]
             AVAILABLE_CEREBRAS_MODELS = model_ids
             
             env_model = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b").strip()
-            if env_model in model_ids:
-                CEREBRAS_MODEL = env_model
-            elif "llama3.3-70b" in model_ids:
-                CEREBRAS_MODEL = "llama3.3-70b"
-            elif "llama-3.3-70b" in model_ids:
+            
+            # Ưu tiên số 1: Model ID chuẩn của Cerebras Paid
+            if "llama-3.3-70b" in model_ids:
                 CEREBRAS_MODEL = "llama-3.3-70b"
+            elif env_model in model_ids:
+                CEREBRAS_MODEL = env_model
+            elif "llama3.1-70b" in model_ids:
+                CEREBRAS_MODEL = "llama3.1-70b"
             else:
                 for m_id in model_ids:
-                    if "llama" in m_id.lower() or "gemma" in m_id.lower():
+                    if "llama" in m_id.lower():
                         CEREBRAS_MODEL = m_id
                         break
-    except Exception:
-        pass
+            print(f"✅ ĐÃ KÍCH HOẠT MODEL SUCCESS: {CEREBRAS_MODEL}")
+        else:
+            print(f"🚨 LỖI API CEREBRAS (Status {res.status_code}): {res.text}")
+            CEREBRAS_MODEL = "llama-3.3-70b"
+    except Exception as e:
+        print(f"🚨 LỖI KẾT NỐI KHI CHECK MODEL: {str(e)}")
+        CEREBRAS_MODEL = "llama-3.3-70b"
 
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
@@ -116,7 +125,7 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "360.0",
+        "version": "380.0",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "backup_gemini_model": GEMINI_MODEL
@@ -131,7 +140,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# TRÍCH XUẤT VÀ LÀM SẠCH DỮ LIỆU
+# TRÍCH XUẤT VÀ LÀM SẠCH DỮ LIỆU CHÍNH XÁC
 # ------------------------------------------------------------------------------
 def extract_user_text(event: dict) -> str:
     if isinstance(event.get("message"), dict):
@@ -178,7 +187,7 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
             score = 0
             dev_name = str(row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", ""))).lower()
             for w in words:
-                if len(w) >= 3 and w in dev_name: score += 50
+                if len(w) >= 2 and w in dev_name: score += 50
                 elif w in row_text: score += 3
             if score > 0: scored_rows.append((score, tab, row))
 
@@ -204,42 +213,45 @@ def clean_thinking_process(text: str) -> str:
     return text.strip()
 
 # ------------------------------------------------------------------------------
-# PROMPT KHO SAPO - BẮT BỘ LỌC PHẦN CỨNG CHÍNH XÁC (HARDWARE GATEKEEPER)
+# PROMPT CHUẨN KHO SAPO - KHÓA PHÂN LOẠI THIẾT BỊ
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
 Bạn là **Trợ Lý KHO Sapo** – Chuyên gia IT cao cấp phụ trách kỹ thuật phần cứng Sapo cực kỳ THÔNG MINH, TINH TẾ và CHÍNH XÁC CÔNG NGHỆ.
 
-🎯 QUY TẮC BẮT BỘ KIỂM TRA PHẦN CỨNG (HARDWARE GATEKEEPER - BẮT BUỘC):
-1. **ĐỐI CHIẾU CỔNG KẾT NỐI TRONG KHO DỮ LIỆU BÊN DƯỚI:**
-   - Nếu thiết bị trong kho dữ liệu ghi chỉ có cổng **USB / Máy tính** (Ví dụ: G8, K200U, SPR01 bản USB...):
-     ➔ **TUYỆT ĐỐI KHÔNG DÙNG MENU "Cài đặt qua điện thoại"**.
-     ➔ Nếu người dùng hỏi hoặc chọn "cài qua điện thoại/máy POS", bạn PHẢI TỪ CHỐI NGAY: 
-        *"Dạ thiết bị **[Tên máy]** là dòng máy in kết nối qua cổng **USB với Máy tính**, KHÔNG hỗ trợ kết nối in qua Điện thoại hay App mobile ạ. Anh/chị chuyển sang cài đặt trên Máy tính giúp em nhé!"*
-     ➔ TUYỆT ĐỐI KHÔNG BỊA ĐẶT các bước cài Wi-Fi, Bluetooth hay App XTEST cho thiết bị chỉ có cổng USB!
+🚨 LUẬT KHÓA PHÂN LOẠI THIẾT BỊ (CHỐNG LẪN LỘN CỰC KỲ QUAN TRỌNG):
+1. **NHẬN DIỆN ĐÚNG LOẠI THIẾT BỊ ĐANG HỎI:**
+   - **MÁY IN TEM NHÃN / MÃ VẠCH (Ví dụ: G8, SPL01, XP-350B, XP-420B, SP460BT...):**
+     ➔ Đây là dòng máy chuyên dùng để IN TEM/MÃ VẠCH.
+     ➔ **TUYỆT ĐỐI CẤM** gọi dòng máy này là "máy in hóa đơn" hoặc phát ngôn "Máy in hóa đơn này không in được giấy tem"!
+   - **MÁY IN HÓA ĐƠN (Ví dụ: SPR01, SPR02, K200L, K200U...):**
+     ➔ Đây là dòng máy chuyên dùng để IN HÓA ĐƠN KHỔ K80/K57.
 
-2. **CHỈ HƯỚNG DẪN IN QUA ĐIỆN THOẠI KHI:**
-   - Thiết bị có ghi rõ cổng kết nối: **LAN, Wi-Fi, hoặc Bluetooth** trong kho dữ liệu.
+2. **CẮT BỎ LỊCH SỬ MÁY CŨ (CONTEXT ISOLATION):**
+   - Khi người dùng đổi sang hỏi tên máy mới (Ví dụ: vừa hỏi SPR02 xong chuyển sang hỏi G8), bạn PHẢI TẬP TRUNG 100% VÀO MÁY MỚI (G8).
+   - KHÔNG ĐƯỢC mang cảnh báo hay đặc tính của máy cũ (SPR02) gán cho máy mới (G8).
+
+3. **BẮT BỘ KIỂM TRA PHẦN CỨNG (HARDWARE GATEKEEPER):**
+   - Nếu thiết bị trong kho dữ liệu ghi chỉ có cổng **USB / Máy tính** (Ví dụ: G8, K200U...):
+     ➔ **TUYỆT ĐỐI KHÔNG DÙNG MENU "Cài đặt qua điện thoại"**.
+     ➔ Nếu người dùng hỏi hoặc chọn "cài qua điện thoại/máy POS", từ chối ngay: *"Dạ thiết bị **[Tên máy]** là dòng máy in kết nối qua cổng USB với Máy tính, KHÔNG hỗ trợ kết nối in qua Điện thoại hay App mobile ạ."*
 
 ---
 
 🎯 QUY TẮC PHẢN HỒI THÔNG MINH THEO KỊCH BẢN:
 
-1. **CÂU HỎI CHỈ CÓ TÊN MÁY (HỎI LẠI ĐỂ KHOANH VÙNG):**
+1. **CÂU HỎI CHỈ CÓ TÊN MÁY:**
    - Nếu máy CÓ hỗ trợ Điện thoại/LAN: Đưa ra 3 lựa chọn (1. Máy tính, 2. Điện thoại/Máy POS, 3. Sự cố).
-   - Nếu máy CHỈ hỗ trợ USB (như G8): Chỉ đưa ra 2 lựa chọn:
-     "Dạ thiết bị **[Tên thiết bị]** (kết nối USB Máy tính), anh/chị đang cần em hỗ trợ mục nào dưới đây ạ?
-     1. 💻 **Cài đặt Driver trên Máy tính (Windows / Mac)**
-     2. 🛠️ **Khắc phục sự cố** (Không cắt giấy, in ra giấy trắng, báo đèn đỏ...)"
+   - Nếu máy CHỈ hỗ trợ USB (như G8): Chỉ đưa ra 2 lựa chọn (1. Máy tính, 2. Sự cố).
 
 2. **CÂU HỎI RÕ Ý ĐỊNH:**
    - Trả lời thẳng vào giải pháp, trình bày ngắn gọn, gạch đầu dòng rõ ràng.
    - Đính kèm đầy đủ link tài liệu/driver/video từ KHO DỮ LIỆU.
 
 3. **LUẬT THÉP CHỐNG BỊA ĐẶT:**
-   - TRẢ LỜI 100% BẰNG TIẾNG VIỆT. TUYỆT ĐỐI KHÔNG xuất ra các đoạn suy nghĩ Tiếng Anh.
+   - TRẢ LỜI 100% BẰNG TIẾNG VIỆT.
    - Chỉ được phép cung cấp Link Driver / Tài liệu nếu Link đó CÓ TRONG mục KHO DỮ LIỆU bên dưới.
-   - Không tự vẽ bảng rác. Dùng xưng hô "Em" - gọi "Anh/chị".
+   - Dùng xưng hô "Em" - gọi "Anh/chị". Tuyệt đối không vẽ bảng.
 
 ---
 
@@ -329,7 +341,7 @@ async def chat_stream(req: ChatRequest):
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
     user_msgs = [m["text"] for m in req.messages if m.get("role") in ["user", "Khach_Hang"]]
-    combined_query = " ".join(user_msgs[-3:]) if user_msgs else latest_msg
+    combined_query = user_msgs[-1] if user_msgs else latest_msg
 
     focused_knowledge = get_high_precision_knowledge(combined_query, req.role)
     system_instruction = build_smart_system_prompt(focused_knowledge)
@@ -339,7 +351,7 @@ async def chat_stream(req: ChatRequest):
         
         if CEREBRAS_API_KEY and CEREBRAS_MODEL:
             messages_payload = [{"role": "system", "content": system_instruction}]
-            trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
+            trimmed = req.messages[-3:] if len(req.messages) > 3 else req.messages
             for m in trimmed:
                 role_type = "user" if m["role"] == "user" else "assistant"
                 messages_payload.append({"role": role_type, "content": m["text"]})
@@ -381,7 +393,7 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
 # ------------------------------------------------------------------------------
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - TRẦN TIMEOUT 2.8S
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat)
 # ------------------------------------------------------------------------------
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
