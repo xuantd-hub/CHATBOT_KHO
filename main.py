@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Master Engine", version="180.1")
+app = FastAPI(title="Trợ Lý KHO Sapo Perfect Engine", version="185.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,13 +42,13 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO VÀ TỰ ĐỘNG CHỌN MODEL GROQ CHUẨN CHAT
+# KHỞI TẠO HTTP CLIENT (TIMEOUT TỐI ƯU FAILOVER 6S)
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
     global HTTP_CLIENT
     HTTP_CLIENT = httpx.AsyncClient(
-        timeout=httpx.Timeout(15.0, read=45.0),
+        timeout=httpx.Timeout(6.0, read=30.0), # Rút ngắn connect timeout xuống 6s để chuyển Gemini tức thì nếu Groq kẹt
         limits=httpx.Limits(max_keepalive_connections=30, max_connections=100)
     )
     asyncio.create_task(load_sheet_data_async())
@@ -67,12 +67,11 @@ async def discover_active_groq_model():
     url = "https://api.groq.com/openai/v1/models"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
     try:
-        res = await HTTP_CLIENT.get(url, headers=headers, timeout=5.0)
+        res = await HTTP_CLIENT.get(url, headers=headers, timeout=4.0)
         if res.status_code == 200:
             models_data = res.json().get("data", [])
             model_ids = [m["id"] for m in models_data]
             
-            # Ưu tiên các model chat mạnh nhất của Groq (bỏ qua prompt-guard/eval)
             preferred_order = [
                 "llama-3.3-70b-versatile",
                 "openai/gpt-oss-120b",
@@ -113,7 +112,7 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "180.0",
+        "version": "185.0",
         "active_groq_model": ACTIVE_GROQ_MODEL,
         "backup_gemini_model": GEMINI_MODEL
     }
@@ -127,7 +126,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# HÀM BÓC TÁCH & GHÉP NGỮ CẢNH TÌM KIẾM ĐA LƯỢT
+# HÀM TRÍCH XUẤT VÀ LÀM SẠCH SUY NGHĨ TIẾNG ANH
 # ------------------------------------------------------------------------------
 def extract_user_text(event: dict) -> str:
     if isinstance(event.get("message"), dict):
@@ -189,11 +188,10 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
     return knowledge_text
 
 def clean_thinking_process(text: str) -> str:
-    """ Loại bỏ đoạn suy nghĩ Tiếng Anh (Thinking Process) của các model reasoning """
+    """ Loại bỏ triệt để đoạn suy nghĩ Tiếng Anh (Thinking Process / <think>) """
     if "Here's a thinking process:" in text:
         parts = text.split("Here's a thinking process:")
         last_part = parts[-1]
-        # Tìm vị trí câu trả lời thực sự bằng Tiếng Việt
         match = re.search(r'(Dạ\s+|Xin chào|Trợ Lý KHO|\*\*|1\.|- )', last_part)
         if match:
             return last_part[match.start():].strip()
@@ -201,6 +199,9 @@ def clean_thinking_process(text: str) -> str:
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     return text.strip()
 
+# ------------------------------------------------------------------------------
+# PROMPT CHUẨN HÓA ĐẦY ĐỦ 100% QUY TẮC
+# ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
 # VAI TRÒ & TƯ DUY NGHỆ CƠ BẢN (IDENTITY & EXPERT MINDSET)
@@ -208,7 +209,7 @@ def build_smart_system_prompt(knowledge_context: str) -> str:
 Bạn là **Trợ Lý KHO Sapo** – Chuyên gia IT cao cấp phụ trách kỹ thuật phần cứng (máy in đơn hàng, máy in tem, máy quét mã vạch, thiết bị POS...).
 - **Phong thái:** Thực chiến, nhạy bén, điềm tĩnh, chuyên nghiệp như một Kỹ thuật viên IT lâu năm.
 - **Xưng hô:** Xưng "Em", gọi người dùng là "Anh/chị".
-- **Tư duy cốt lõi (Root Cause Analysis):** Luôn phân tích sự cố theo chiều hướng: **Phần cứng (Điện, dây, giấy) ➡️ Phần mềm (Driver, Khổ giấy) ➡️ Kết nối (IP, LAN, Bluetooth)**. Hướng dẫn người dùng làm bước ĐƠN GIẢN NGHĨA LÀ TRƯỚC, BỚT PHỨC TẠP SAU.
+- **Tư duy cốt lõi (Root Cause Analysis):** Luôn phân tích sự cố theo chiều hướng: **Phần cứng (Điện, dây, giấy) ➡️ Phần mềm (Driver, Khổ giấy) ➡️ Kết nối (IP, LAN, Bluetooth)**. Hướng dẫn người dùng làm bước ĐƠN GIẢN TRƯỚC, BỚT PHỨC TẠP SAU.
 
 ---
 
@@ -220,15 +221,13 @@ Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên k
 3. **Cổng kết nối:** (USB, LAN, Bluetooth, Wi-Fi)
 4. **Mục đích sử dụng:** (In hóa đơn, in tem nhãn, in đơn hàng sàn TMĐT...)
 
-*Ví dụ tư duy:* Nếu người dùng hỏi "In không ra chữ trên máy SPR02 qua điện thoại" ➡️ Tự động liên kết: SPR02 (Máy in nhiệt) + Điện thoại (Kết nối App/IP) + In ra giấy trắng (Lắp ngược cuộn giấy nhiệt HOẶC sai IP) ➡️ Đưa ra chẩn đoán chính xác ngay lập tức.
-
 ---
 
 # QUY TRÌNH XỬ LÝ THEO KỊCH BẢN (ADAPTIVE WORKFLOWS)
 
 ### KỊCH BẢN A: CÂU HỎI TỪ KHÓA CHUNG / CHỈ CÓ TÊN MÁY
 *(Ví dụ: "spr02", "k200l", "xprinter")*
-- **HÀNH ĐỘNG:** BỎ QUA các chi tiết link trong Kho dữ liệu, TUYỆT ĐỐI KHÔNG xả tài liệu dài dòng. Chỉ hỏi lại lịch sự để thu hẹp phạm vi hỗ trợ:
+- **HÀNH ĐỘNG:** BỎ QUA các chi tiết link trong Kho dữ liệu, TUYỆT ĐỐI KHÔNG xả tài liệu dài dòng hay danh sách lỗi. Chỉ hỏi lại lịch sự để khoanh vùng nhu cầu:
   "Dạ thiết bị **[Tên thiết bị]**, anh/chị đang cần em hỗ trợ mục nào dưới đây ạ?
   1. 💻 **Cài đặt Driver trên Máy tính** (Windows / Mac)
   2. 📱 **Cài đặt in qua Điện thoại / Máy POS** (App XTEST / Kết nối LAN / Đổi IP)
@@ -236,49 +235,41 @@ Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên k
 
 ### KỊCH BẢN B: XỬ LÝ SỰ CỐ / BÁO LỖI KỸ THUẬT / CẦN CÀI ĐẶT CỤ THỂ
 *(Ví dụ: "in ra giấy trắng", "cài spr02 qua điện thoại", "driver spr02")*
-- **HÀNH ĐỘNG:** Đưa ra giải pháp trực diện, ngắn gọn theo luồng 3 bước kỹ thuật:
-  - **Bước 1: Kiểm tra nhanh phần cứng** (Công tắc, dây cáp, chiều lắp giấy nhiệt).
-  - **Bước 2: Cấu hình phần mềm/mạng** (Chỉnh driver, cài đúng IP, chọn đúng khổ giấy).
-  - **Bước 3: Hướng dẫn nâng cao / Link cài đặt** (Đính kèm đầy đủ link Driver/Tài liệu tương ứng từ Kho dữ liệu).
+- **HÀNH ĐỘNG:** Trả lời trực diện giải pháp cho thiết bị đang đề cập. Đưa ra quy trình từng bước rõ ràng và đính kèm ĐẦY ĐỦ link Driver/Tài liệu tương ứng từ Kho dữ liệu bên dưới.
 
 ### KỊCH BẢN C: THIẾU THÔNG TIN THIẾT BỊ (ĐIỀN KHUYẾT THÔNG MINH)
 *(Ví dụ: "cài máy in hóa đơn", "in tem bị chệch")*
-- **HÀNH ĐỘNG:** 
-  - Nếu trong các tin nhắn trước người dùng ĐÃ NÓI tên thiết bị: Dùng ngay tên thiết bị đó để xử lý theo Kịch bản B, KHÔNG HỎI LAI.
+- **HÀNH ĐỘNG:** - Nếu trong các tin nhắn trước người dùng ĐÃ NÓI tên thiết bị: Dùng ngay tên thiết bị đó để xử lý theo Kịch bản B, TUYỆT ĐỐI KHÔNG HỎI LAI.
   - Nếu người dùng CHƯA NÓI tên thiết bị: Đưa ngay quy trình xử lý chuẩn IT chung (VD: hướng dẫn vào Control Panel > Devices and Printers) 💬 **ĐỒNG THỜI** kết bài bằng lời hỏi khéo: *"Anh/chị cho em xin tên model máy (VD: SPR02, SPL01...) để em gửi chính xác link Driver và video thao tác nhé ạ!"*
 
-### KỊCH BẢN D: THIẾT BỊ NẰM NGOÀI DANH MỤC
-*(Ví dụ: Người dùng hỏi về máy in Canon, Epson... không có trong kho dữ liệu)*
-- **HÀNH ĐỘNG:** Trả lời lịch sự: *"Dạ thiết bị này hiện nằm ngoài danh mục thiết bị chuẩn do Sapo cung cấp. Tuy nhiên theo chuẩn kỹ thuật chung, anh/chị có thể kiểm tra [đưa ra 1-2 bước xử lý IT cơ bản]. Nếu cần hỗ trợ thêm, anh/chị vui lòng liên hệ tổng đài Sapo nhé ạ!"*
+### KỊCH BẢN D: THIẾU DỮ LIỆU HOẶC MÁY NGOÀI DANH MỤC
+- **HÀNH ĐỘNG:** Đưa ra hướng xử lý IT căn bản và gợi ý liên hệ tổng đài Sapo.
 
 ---
 
 # LUẬT THÉP BẢO VỆ DỮ LIỆU & CHỐNG BỊA ĐẶT (STRICT GUARDRAILS)
 
-1. **Ngôn ngữ chuẩn 100% Tiếng Việt:** TUYỆT ĐỐI KHÔNG để lọt các dòng suy nghĩ bằng tiếng Anh (như "Analyzing prompt...", "Thought process...").
-2. **Kiểm soát Link tuyệt đối (Zero Hallucinated URLs):** 
-   - CHỈ ĐƯỢC CUNG CẤP LINK nếu link đó có mặt 100% chính xác trong `{knowledge_context}`.
-   - Nếu KHÔNG CÓ LINK trong kho dữ liệu ➡️ Tuyệt đối KHÔNG tự bịa link dạng `sapo.vn/...` hay link ngoài. Hãy hướng dẫn bằng lời hoặc bảo: *"Dạ phần này em chưa có sẵn file tải trực tiếp, em hướng dẫn anh/chị thao tác trực tiếp trên máy nhé!"*
-3. **Chính xác hotline:** Số tổng đài / hotline kỹ thuật bắt buộc phải trích xuất chuẩn xác từ tài liệu chính sách.
-4. **Vận dụng tri thức IT an toàn:** Được phép dùng kiến thức IT chuẩn (thao tác Windows, Mac, IP, Control Panel) để giải thích chi tiết, nhưng các thông số riêng của Sapo phải bám sát Kho dữ liệu.
+1. **Ngôn ngữ chuẩn 100% Tiếng Việt:** TUYỆT ĐỐI KHÔNG xuất ra dòng suy nghĩ bằng tiếng Anh (như "Analyzing prompt...", "Thought process...", "Here's a thinking process").
+2. **Kiểm soát Link tuyệt đối (Zero Hallucinated URLs):** - CHỈ ĐƯỢC CUNG CẤP LINK nếu link đó có mặt 100% chính xác trong `{knowledge_context}`.
+   - Nếu KHÔNG CÓ LINK trong kho dữ liệu ➡️ Tuyệt đối KHÔNG tự bịa link dạng `sapo.vn/...` hay link ngoài.
+3. **Định dạng Link chuẩn:** Đính kèm link chuẩn dạng `<URL>` hoặc `[Tên hiển thị](URL)`.
 
 ---
 
 # CHUẨN TRÌNH BÀY DÀNH CHO KỸ THUẬT (FORMATTING RULES)
 
-- **Đường dẫn thao tác rõ ràng:** Dùng dấu `>` để hướng dẫn từng bước trên phần mềm (Ví dụ: **Control Panel** > **View devices and printers** > Click chuột phải chọn **Printer Properties**).
+- **Đường dẫn thao tác rõ ràng:** Dùng dấu `>` để hướng dẫn từng bước (Ví dụ: **Control Panel** > **View devices and printers** > **Printer Properties**).
 - **Trình bày:** Sử dụng gạch đầu dòng, các từ khóa quan trọng và tên nút bấm phải **in đậm** bằng `**từ khóa**`.
-- **Tương tác:** Thêm emoji trực quan (💻, 📱, 🔌, ⚠️, 📌) giúp đoạn văn dễ đọc.
 - **CẤM DÙNG BẢNG:** Tuyệt đối KHÔNG xuất bảng Markdown dưới mọi hình thức.
 
 ---
 
 # KHO DỮ LIỆU GỐC SAPO
 {knowledge_context}
-    """
+"""
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI GEMINI 3.6 FLASH DỰ PHÒNG
+# HÀM GỌI GEMINI 3.6 FLASH CÓ RETRY BẢO VỆ
 # ------------------------------------------------------------------------------
 async def call_gemini_with_retry(system_instruction: str, user_message: str) -> str:
     if not GEMINI_API_KEY:
@@ -297,7 +288,7 @@ async def call_gemini_with_retry(system_instruction: str, user_message: str) -> 
 
     for attempt in range(3):
         try:
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=12.0)
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=10.0)
             if res.status_code == 200:
                 data = res.json()
                 raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
@@ -324,7 +315,7 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
             "max_tokens": 2000
         }
         try:
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=12.0)
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
             if res.status_code == 200:
                 data = res.json()
                 raw_text = data["choices"][0]["message"]["content"]
@@ -349,7 +340,7 @@ def wrap_gsuite_addon_response(text_message: str) -> dict:
     }
 
 # ------------------------------------------------------------------------------
-# 1. CỔNG WEB CHAT (/chat)
+# 1. CỔNG WEB CHAT (/chat) - SỬA LỖI MẤT NHỚ FAILOVER
 # ------------------------------------------------------------------------------
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -362,7 +353,7 @@ async def chat_stream(req: ChatRequest):
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
-    # ⚡ ĐIỂM SỬA QUAN TRỌNG: Ghép 3 câu nói gần nhất để KHÔNG BỊ MẤT TÊN MÁY (VD: SPR02) ở câu thứ 2
+    # Ghép 3 câu nói gần nhất để giữ nguyên tên máy (SPR02, SPL01...) xuyên suốt cuộc hội thoại
     user_msgs = [m["text"] for m in req.messages if m.get("role") in ["user", "Khach_Hang"]]
     combined_query = " ".join(user_msgs[-3:]) if user_msgs else latest_msg
 
@@ -401,7 +392,8 @@ async def chat_stream(req: ChatRequest):
                                     choices = data_json.get("choices", [])
                                     if choices:
                                         chunk = choices[0].get("delta", {}).get("content", "")
-                                        if chunk:
+                                        # Loại bỏ thẻ <think> trong lúc stream
+                                        if chunk and not chunk.startswith("<think>"):
                                             has_yielded = True
                                             yield chunk
                                 except Exception: pass
@@ -409,9 +401,9 @@ async def chat_stream(req: ChatRequest):
                             return
             except Exception: pass
 
-        # 2. DỰ PHÒNG GEMINI 3.6 FLASH
+        # 2. DỰ PHÒNG SANG GEMINI VỚI TRỌN VẸN CẢ NGỮ CẢNH HỘI THOẠI (SỬA DỨT ĐIỂM DÒNG 268 CŨ)
         if not has_yielded:
-            fallback_ans = await call_gemini_with_retry(system_instruction, latest_msg)
+            fallback_ans = await call_gemini_with_retry(system_instruction, combined_query)
             yield fallback_ans
 
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
