@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Cerebras Perfect Engine", version="800.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Universal Engine", version="900.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH CEREBRAS API & LƯU BỘ NHỚ RAM
+# CẤU HÌNH BIẾN MÔI TRƯỜNG & LƯU BỘ NHỚ RAM
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "").strip()
@@ -99,8 +99,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "800.0", 
-        "engine": "Cerebras Dedicated",
+        "version": "900.0", 
+        "engine": "Cerebras Dedicated Universal Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY)
@@ -115,7 +115,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# LÀM SẠCH CHỮ VÀ TRÍCH XUẤT CÂU HỎI
+# LÀM SẠCH VĂN BẢN VÀ TRÍCH XUẤT CÂU HỎI
 # ------------------------------------------------------------------------------
 def clean_thinking_process(text: str) -> str:
     if "Here's a thinking process:" in text:
@@ -157,105 +157,92 @@ def extract_user_text(event: dict) -> str:
     return deep_search(event)
 
 # ------------------------------------------------------------------------------
-# TRÍCH XUẤT DỮ LIỆU TỰ NHIÊN TỪ SHEET (RAG NHẸ & CHÍNH XÁC)
+# THUẬT TOÁN LỌC DỮ LIỆU TỔNG QUÁT THEO DANH MỤC (RAG MULTI-TAB)
 # ------------------------------------------------------------------------------
 def get_high_precision_knowledge(query: str, role: str) -> str:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     query_lower = query.lower()
-
-    # Nhận diện tên thiết bị cụ thể
-    device_models = ["spr02", "spr01", "k200l", "k200u", "a868", "hprt", "80fe", "spl01", "xp350b", "g8", "a160m"]
-    detected_dev = None
-    for dev in device_models:
-        if dev in query_lower:
-            detected_dev = dev
-            break
+    
+    stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "thế", "nào", "bao", "nhiêu", "thông", "số", "qua", "đã", "ok"}
+    words = [w for w in query_lower.split() if len(w) > 1 and w not in stop_words]
+    if not words: words = [query_lower]
 
     scored_rows = []
     for tab in accessible_tabs:
         for row in RAM_CACHE.get(tab, []):
             row_text = " ".join(str(v).lower() for v in row.values())
-            dev_field = str(row.get("Ten_Thiet_Bi", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower()
-            
             score = 0
-            if detected_dev:
-                if detected_dev in dev_field: score += 500
-                else: continue
-            else:
-                score += 1
+            
+            # Tính điểm khớp từ khóa trong toàn bộ dòng
+            for w in words:
+                if w in row_text:
+                    score += 10
+            
+            # Ưu tiên cộng điểm cao nếu khớp Tên Thiết Bị / Loại Thao Tác / Tên Lỗi / Tên Chính Sách
+            key_field = str(row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", row.get("Ten_Loi", row.get("Ten_Chinh_Sach", row.get("Tu_Khoa_Nhan_Dien", "")))))).lower()
+            for w in words:
+                if len(w) >= 2 and w in key_field:
+                    score += 100
 
             if score > 0:
                 scored_rows.append((score, tab, row))
 
     scored_rows.sort(key=lambda x: x[0], reverse=True)
-    top_matches = scored_rows[:2]
+    top_matches = scored_rows[:3]
 
     knowledge_text = ""
     for score, tab, row in top_matches:
-        knowledge_text += f"\n=== DỮ LIỆU TỪ SHEET TAB [{tab}] ===\n"
+        knowledge_text += f"\n=== DỮ LIỆU THUỘC TAB [{tab}] ===\n"
         for key, value in row.items():
-            if value: knowledge_text += f"- {key}: {value}\n"
+            if value: 
+                knowledge_text += f"- {key}: {value}\n"
+
     return knowledge_text
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT TỐI ƯU DÀNH RIÊNG CHO CEREBRAS (CHUẨN 100% THEO ẢNH MẪU)
+# PROMPT HỆ THỐNG TỔNG QUÁT BẢO VỆ TOÀN BỘ THƯ VIỆN
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
-Bạn là **Trợ Lý KHO Sapo** – Kỹ thuật viên hỗ trợ phần cứng Sapo cực kỳ THÔNG MINH, TINH TẾ và LỊCH SỰ.
+Bạn là **Trợ Lý KHO Sapo** – Chuyên gia IT cao cấp hỗ trợ Kỹ thuật, Lỗi thiết bị, Cài đặt và Chính sách của Sapo.
+Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, ngắn gọn, chính xác, tinh tế.
 
-🎯 QUY TẮC PHẢN HỒI BẮT BUỘC (TUÂN THỦ 100%):
+🎯 BỘ QUY TẮC PHÂN LOẠI Ý ĐỊNH VÀ PHẢN HỒI (ÁP DỤNG TOÀN HỆ THỐNG):
 
-📌 KỊCH BẢN 1: KHI NGƯỜI DÙNG NÓI CÂU CHUNG CHUNG / CHƯA NÓI TÊN MÁY HOẶC CHƯA CHỌN CÁCH CÀI
-(Ví dụ: "mình cần cài máy in hóa đơn trên điện thoại", "cài máy in", "hướng dẫn cài máy in"):
-👉 TUYỆT ĐỐI KHÔNG xả ra bài hướng dẫn dài dòng! Hãy trả lời CHÍNH XÁC theo khung mẫu dưới đây:
+1. TRƯỜNG HỢP 1: CÂU HỎI MẬP MỜ / CHỈ NÓI TÊN THIẾT BỊ / CHỈ NÓI TÊN CHÍNH SÁCH
+(Ví dụ: "spr02", "k200l", "chính sách đổi trả", "máy in xprinter", "bảo hành"):
+👉 TUYỆT ĐỐI KHÔNG tự đoán mò nhu cầu! KHÔNG xả ngay bài hướng dẫn dài dòng hay tự ý gán kịch bản cài mobile/PC!
+👉 BẮT BUỘC hỏi lại 1 câu khoanh vùng nhu cầu tùy theo đối tượng:
+   - Nếu là THIẾT BỊ (Ví dụ: SPR02, K200L...):
+     "Dạ, với thiết bị **[Tên thiết bị]**, anh/chị cần em hỗ trợ mục nào dưới đây ạ?
+      1. 💻 Cài đặt trên Máy tính (Windows / Mac)
+      2. 📱 Cài đặt trên Điện thoại / App (App XTEST / Kết nối LAN)
+      3. 🛠️ Sửa lỗi kỹ thuật / Tra cứu thông số"
+   - Nếu là CHÍNH SÁCH / NỘI BỘ / LỖI CHUNG (Bảo hành, Thu hồi, Chiết khấu...):
+     "Dạ, về **[Chủ đề]**, anh/chị đang cần tra cứu quy định hoặc hướng dẫn cụ thể nào ạ?"
 
-"Dạ, để hỗ trợ anh/chị cài đặt máy in hóa đơn trên điện thoại, em cần xác nhận thêm một chút thông tin để gửi hướng dẫn nhé:
+2. TRƯỜNG HỢP 2: CÂU HỎI ĐÃ CÓ Ý ĐỊNH RÕ RÀNG
+(Ví dụ: "cài driver spr02 máy tính", "spr02 in ra giấy trắng", "chính sách bảo hành máy in 12 tháng"):
+👉 Trả lời TRỰC DIỆN, tóm tắt 3-4 bước ngắn gọn, rõ ràng.
+👉 ĐÍNH KÈM TÀI LIỆU VÀ MỆNH ĐỀ MATCH 100% (MATCHING STRICT RULE):
+   - Đang hỏi CÀI TRÊN ĐIỆN THOẠI ➔ CHỈ đính kèm link/video App Mobile. TUYỆT ĐỐI CẤM gửi link Driver Win/Mac hoặc ảnh màn hình Windows Properties!
+   - Đang hỏi CÀI TRÊN MÁY TÍNH ➔ CHỈ đính kèm link Driver Win/Mac & video thao tác PC.
+   - Đang hỏi SỬA LỖI ➔ CHỈ gửi hướng dẫn xử lý lỗi đó, KHÔNG đính kèm link cài đặt ban đầu.
+   - Đang hỏi CHÍNH SÁCH / NỘI BỘ ➔ Trích xuất đúng điều khoản trong Tab [3_CHINH_SACH_SAPO] hoặc [4_DU_LIEU_NOI_BO].
 
-1. **Anh/chị đang dùng máy in hãng nào ạ?** (Ví dụ: Xprinter (SPR02, K200L...), HPRT (80FE...), hay hãng khác?)
-
-2. **Anh/chị muốn cài đặt theo cách nào?**
-   - **Cách A:** Cài qua App XTEST (phổ biến nhất cho máy Xprinter).
-   - **Cách B:** Cài trực tiếp trong Cài đặt của điện thoại (Android/iOS) mà không cần tải app ngoài.
-
-👉 Ví dụ: \"Em dùng máy SPR02, muốn cài qua app XTEST\" hoặc \"Em dùng HPRT 80FE\".
-
-Anh/chị cho em biết cụ thể để em gửi link hướng dẫn chi tiết ngay ạ! 🙏"
-
----
-
-📌 KỊCH BẢN 2: KHI NGƯỜI DÙNG ĐÃ NÓI RÕ TÊN MÁY HOẶC ĐÃ CHỌN CÁCH CÀI
-(Ví dụ: "cài trên app xtest nhé", "cài driver spr02 máy tính", "hướng dẫn cài spr02"):
-👉 Trả lời ngắn gọn, đúng trọng tâm (chỉ 3-4 bước ngắn) và TRÍCH XUẤT ĐÚNG LINK TỪ KHO DỮ LIỆU BÊN DƯỚI:
-
-"Dạ, em hỗ trợ anh/chị cài đặt in hóa đơn qua ứng dụng XTEST trên điện thoại ngay ạ.
-
-Dưới đây là các bước và tài liệu hướng dẫn chi tiết:
-
-📱 **Hướng dẫn cài đặt qua App XTEST:**
-1. **Tải ứng dụng:** Anh/chị tải app XTEST từ App Store (iOS) hoặc CH Play (Android).
-2. **Kết nối:** Mở app, chọn kết nối với máy in (thường là qua Wi-Fi hoặc Bluetooth tùy model).
-3. **Cấu hình IP:** Trong app XTEST, anh/chị cần thiết lập địa chỉ IP cho máy in để kết nối với hệ thống Sapo.
-4. **Kiểm tra:** In thử một trang test để đảm bảo máy in hoạt động bình thường.
-
-📄 **Tài liệu hướng dẫn chi tiết (Văn bản):** <Gợi ý tên tài liệu> (<Chèn Link Google Doc lấy từ dữ liệu>)
-🎥 **Video hướng dẫn trực quan:** <Gợi ý tên video> (<Chèn Link Video lấy từ dữ liệu>)
-
-Anh/chị làm theo video hoặc tài liệu trên nhé. Nếu gặp khó khăn ở bước nào, anh/chị cứ nhắn em hỗ trợ thêm ạ!"
+3. LUẬT THÉP BẢO VỆ DỮ LIỆU CHỐNG HALLUCINATION:
+- KHÔNG TỰ BỊA BƯỚC THỦ CÔNG: Không tự sáng tác các bước Windows Control Panel hay thao tác phần cứng nếu trong Dữ liệu gốc không yêu cầu.
+- KHÔNG TỰ BỊA LINK: Chỉ xuất các đường URL/Drive/Youtube thực sự xuất hiện trong KHO DỮ LIỆU bên dưới. Nếu dữ liệu không có link, chỉ trả lời chữ.
+- KHÔNG LẪN LỘN MEDIA: Nếu không có hình ảnh/video khớp 100% với thao tác đang hỏi, thà KHÔNG GỬI ẢNH chứ tuyệt đối không vứt ảnh rác hoặc ảnh của thiết bị/HĐH khác vào.
 
 ---
 
-❌ LUẬT THÉP CẤM BỊA ĐẶT:
-- TUYỆT ĐỐI CẤM tự bịa ra các bước Windows thủ công như "Control Panel -> Devices and Printers", "Add local printer", "Cutter Select", hay "Giữ nút FEED".
-- CHỈ được đính kèm link thực tế CÓ TRONG KHO DỮ LIỆU bên dưới.
-- Xưng "Em", gọi "Anh/chị".
-
-KHO DỮ LIỆU GỐC CỦA SAPO:
+KHO DỮ LIỆU TRÍCH XUẤT TỪ SHEET (CỦA TẤT CẢ CÁC TAB):
 {knowledge_context}
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI CEREBRAS LLM (CÓ GEMINI LÀM DỰ PHÒNG AN TOÀN)
+# HÀM GỌI CEREBRAS LLM (CÓ GEMINI DỰ PHÒNG)
 # ------------------------------------------------------------------------------
 async def call_llm_with_history(system_instruction: str, messages_list: list) -> str:
     messages_payload = [{"role": "system", "content": system_instruction}]
@@ -280,7 +267,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
                 return clean_thinking_process(data["choices"][0]["message"]["content"])
         except Exception: pass
 
-    # 2. DỰ PHÒNG GEMINI (NẾU CEREBRAS MẤT MẠNG TẠM THỜI)
+    # 2. DỰ PHÒNG GEMINI NẾU CEREBRAS GẶP SỰ CỐ TẠM THỜI
     if GEMINI_API_KEY:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
@@ -321,7 +308,7 @@ def wrap_gsuite_addon_response(text_message: str) -> dict:
     }
 
 # ------------------------------------------------------------------------------
-# 1. CỔNG WEB CHAT (/chat) - CEREBRAS STREAMING
+# 1. CỔNG WEB CHAT (/chat)
 # ------------------------------------------------------------------------------
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -347,7 +334,7 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
 # ------------------------------------------------------------------------------
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - CEREBRAS ENGINE
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat)
 # ------------------------------------------------------------------------------
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
