@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Smart Platform & Aesthetics Engine", version="2000.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Perfect Platform Engine", version="2100.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,8 +100,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "2000.0", 
-        "engine": "Smart Platform & Aesthetics Engine",
+        "version": "2100.0", 
+        "engine": "Perfect Platform Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -190,18 +190,24 @@ def extract_device_info_from_history(messages: list) -> tuple:
     return detected_model, detected_category
 
 def extract_platform_intent(messages: list) -> str:
-    # Soi lại các câu nói gần nhất của người dùng để bắt HĐH
-    user_text = " ".join([m.get("text", "") for m in messages if m.get("role") in ["user", "Khach_Hang"]][-3:]).lower()
-    if any(k in user_text for k in ["windows", "win", "win10", "win11", "win7", "máy tính"]):
-        return "windows"
-    elif any(k in user_text for k in ["mac", "macbook", "macos"]):
-        return "mac"
-    elif any(k in user_text for k in ["điện thoại", "mobile", "app", "xtest", "android", "ios", "iphone", "lan"]):
-        return "mobile"
+    # 🎯 SỬA LỖI: Lặp từ câu tin nhắn MỚI NHẤT ngược về trước để luôn ưu tiên câu hỏi hiện tại
+    user_msgs = [m.get("text", "") for m in messages if m.get("role") in ["user", "Khach_Hang"]]
+    if not user_msgs:
+        return ""
+
+    for msg in reversed(user_msgs[-3:]):
+        txt = msg.lower()
+        if any(k in txt for k in ["mac", "macbook", "macos"]):
+            return "mac"
+        if any(k in txt for k in ["windows", "win", "win10", "win11", "win7"]):
+            return "windows"
+        if any(k in txt for k in ["điện thoại", "mobile", "app", "xtest", "android", "ios", "iphone", "lan"]):
+            return "mobile"
+            
     return ""
 
 # ------------------------------------------------------------------------------
-# TRÍCH XUẤT DỮ LIỆU RAG VỚI BỘ BẮT HỆ ĐIỀU HÀNH THÔNG MINH
+# TRÍCH XUẤT DỮ LIỆU RAG VỚI ƯU TIÊN HỆ ĐIỀU HÀNH TỐI ĐA
 # ------------------------------------------------------------------------------
 def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
@@ -241,15 +247,15 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
             if detected_category and detected_category in row_text:
                 score += 150
 
-            # 🎯 BỘ THƯỞNG ĐIỂM HỆ ĐIỀU HÀNH CHÍNH XÁC KHÔNG LỆCH
+            # 🎯 BỘ THƯỞNG ĐIỂM HỆ ĐIỀU HÀNH CHÍNH XÁC +1000 ĐIỂM
             if tab == "2_HUONG_DAN_CAI_DAT" and platform_intent:
-                row_thao_tac = str(row.get("Loai_Thao_Tac", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower()
-                if platform_intent == "windows" and ("win" in row_thao_tac or "windows" in row_thao_tac):
-                    score += 800
-                elif platform_intent == "mac" and "mac" in row_thao_tac:
-                    score += 800
+                row_thao_tac = str(row.get("Loai_Thao_Tac", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower() + " " + str(row.get("Noi_Dung_Huong_Dan", "")).lower()
+                if platform_intent == "mac" and "mac" in row_thao_tac:
+                    score += 1000
+                elif platform_intent == "windows" and ("win" in row_thao_tac or "windows" in row_thao_tac):
+                    score += 1000
                 elif platform_intent == "mobile" and any(k in row_thao_tac for k in ["app", "xtest", "lan", "điện thoại", "mobile"]):
-                    score += 800
+                    score += 1000
             
             for w in words:
                 if w in row_text:
@@ -271,7 +277,7 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     return knowledge_text, has_device_info
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT SIẾT ĐỊNH DẠNG ICON VÀ BỐ CỤC ĐẸP MẮT
+# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG & BÁM SÁT 100% SHEET
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str, has_device_info: bool) -> str:
     return f"""
@@ -279,9 +285,9 @@ Bạn là **Trợ Lý KHO Sapo** – Trợ lý AI cao cấp, có tư duy logic s
 Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghiệp, hành văn tự nhiên, rõ ràng.
 
 🎨 QUY TẮC BỐ CỤC TRÌNH BÀY ĐẸP MẮT & DỄ ĐỌC (PRESENTATION & ICONS RULE):
-- **Sử dụng Icon/Emoji sinh động** ở đầu các tiêu đề và từng bước thao tác (VD: 💻, 📱, 🛠️, 📌, ✅, 👉, 📄, 🎥, ⚠️).
+- **Sử dụng Icon/Emoji sinh động** ở đầu các tiêu đề và từng bước thao tác (VD: 💻, 🍏, 📱, 🛠️, 📌, ✅, 👉, 📄, 🎥, ⚠️).
 - **Chia nhỏ đoạn văn thoáng đãng**, dùng danh sách gạch đầu dòng (Bullet points).
-- **In đậm các từ khóa quan trọng**, tên nút bấm, tên bước (VD: **Bước 1: Tải Driver**, **Link Driver Windows:**).
+- **In đậm các từ khóa quan trọng**, tên nút bấm, tên bước (VD: **Bước 1: Tải Driver**, **Link Driver Mac:**).
 
 🎯 BỘ QUY TẮC XỬ LÝ QUAN TRỌNG NHẤT (TUÂN THỦ 100%):
 
@@ -298,8 +304,8 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
 
 2. 🛑 TRƯỜNG HỢP 2: KHI ĐÃ CÓ TÊN MODEL MÁY HOẶC ĐÃ NÓI RÕ LOẠI MÁY IN (`HAS_DEVICE_INFO: True`):
    - **BÁM SÁT 100% NỘI DUNG SHEET:** BẮT BUỘC phải trích xuất chính xác từng câu, từng bước và link có trong Dữ liệu bên dưới.
-   - Nếu người dùng hỏi cài trên **Windows**, CHỈ gửi bài hướng dẫn cài Driver Windows từ Sheet.
-   - Nếu người dùng hỏi cài trên **Điện thoại / App / LAN**, CHỈ gửi bài hướng dẫn Mobile/App từ Sheet.
+   - Khi Dữ liệu có bài hướng dẫn cài trên **Mac** (như Dòng 3 Tab 2), AI BẮT BUỘC xuất đầy đủ bài hướng dẫn Mac và dán link `Link_Driver_Mac`. TUYỆT ĐỐI KHÔNG báo "không có dữ liệu Mac" hay hỏi lại câu hỏi phụ!
+   - Khi Dữ liệu có bài hướng dẫn cài trên **Windows**, AI xuất bài Windows và link `Link_Driver_Win`.
 
 👉 🛑 QUY TẮC ĐÍNH KÈM LINK VÀ NỘI DUNG SHEET:
    - Xuất đầy đủ các cột link nếu có trong dòng dữ liệu:
