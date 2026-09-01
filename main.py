@@ -125,6 +125,10 @@ def clean_thinking_process(text: str) -> str:
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     text = re.sub(r'#{1,6}\s*', '', text)
     text = re.sub(r'---+', '', text)
+    
+    # 🎯 XỬ LÝ LỖI DÍNH MÃ LATEX MŨI TÊN
+    text = re.sub(r'\$\\rightarrow\$|\\rightarrow|\$\\Rightarrow\$|\\Rightarrow', '➔', text)
+    
     return text.strip()
 
 def extract_user_text(event: dict) -> str:
@@ -237,6 +241,7 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
 3. LUẬT THÉP CẤM BỊA ĐẶT:
 - Không tự bịa bước Control Panel hay thao tác phần cứng nếu dữ liệu không có.
 - Không tự bịa link URL giả.
+- TUYỆT ĐỐI KHÔNG dùng mã LaTeX toán học (như $\rightarrow$, $\Rightarrow$). Chỉ dùng ký tự mũi tên thông thường như "➔" hoặc "->".
 
 ---
 
