@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Perfect Platform Engine", version="2100.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Rock-Solid Flow Engine", version="2200.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,8 +100,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "2100.0", 
-        "engine": "Perfect Platform Engine",
+        "version": "2200.0", 
+        "engine": "Rock-Solid Flow Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -190,7 +190,6 @@ def extract_device_info_from_history(messages: list) -> tuple:
     return detected_model, detected_category
 
 def extract_platform_intent(messages: list) -> str:
-    # 🎯 SỬA LỖI: Lặp từ câu tin nhắn MỚI NHẤT ngược về trước để luôn ưu tiên câu hỏi hiện tại
     user_msgs = [m.get("text", "") for m in messages if m.get("role") in ["user", "Khach_Hang"]]
     if not user_msgs:
         return ""
@@ -247,7 +246,7 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
             if detected_category and detected_category in row_text:
                 score += 150
 
-            # 🎯 BỘ THƯỞNG ĐIỂM HỆ ĐIỀU HÀNH CHÍNH XÁC +1000 ĐIỂM
+            # BỘ THƯỞNG ĐIỂM HỆ ĐIỀU HÀNH CHÍNH XÁC +1000 ĐIỂM
             if tab == "2_HUONG_DAN_CAI_DAT" and platform_intent:
                 row_thao_tac = str(row.get("Loai_Thao_Tac", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower() + " " + str(row.get("Noi_Dung_Huong_Dan", "")).lower()
                 if platform_intent == "mac" and "mac" in row_thao_tac:
@@ -304,8 +303,12 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
 
 2. 🛑 TRƯỜNG HỢP 2: KHI ĐÃ CÓ TÊN MODEL MÁY HOẶC ĐÃ NÓI RÕ LOẠI MÁY IN (`HAS_DEVICE_INFO: True`):
    - **BÁM SÁT 100% NỘI DUNG SHEET:** BẮT BUỘC phải trích xuất chính xác từng câu, từng bước và link có trong Dữ liệu bên dưới.
-   - Khi Dữ liệu có bài hướng dẫn cài trên **Mac** (như Dòng 3 Tab 2), AI BẮT BUỘC xuất đầy đủ bài hướng dẫn Mac và dán link `Link_Driver_Mac`. TUYỆT ĐỐI KHÔNG báo "không có dữ liệu Mac" hay hỏi lại câu hỏi phụ!
+   - Khi Dữ liệu có bài hướng dẫn cài trên **Mac** (như Dòng 3 Tab 2), AI BẮT BUỘC xuất đầy đủ bài hướng dẫn Mac và dán link `Link_Driver_Mac`. TUYỆT ĐỐI KHÔNG báo "không có dữ liệu Mac"!
    - Khi Dữ liệu có bài hướng dẫn cài trên **Windows**, AI xuất bài Windows và link `Link_Driver_Win`.
+
+   👉 💡 QUY TẮC MỞ ĐẦU LỊCH SỰ KHI GỬI BÀI WINDOWS MẶC ĐỊNH:
+      - Khi người dùng chỉ nói chung chung "mới đổi máy tính" hoặc "máy tính" (mà CHƯA NÓI RÕ là Windows hay Mac), khi gửi bài Windows, AI BẮT BUỘC chèn 1 câu dẫn dắt tự nhiên:
+        "Dạ, em xin gửi anh/chị hướng dẫn cài đặt trên máy tính **Windows** ạ. (Nếu mình đang sử dụng máy **Mac / macOS**, anh/chị cứ nhắn em gửi bài hướng dẫn riêng cho Mac nhé! 😊)"
 
 👉 🛑 QUY TẮC ĐÍNH KÈM LINK VÀ NỘI DUNG SHEET:
    - Xuất đầy đủ các cột link nếu có trong dòng dữ liệu:
