@@ -3,6 +3,7 @@ import io
 import json
 import asyncio
 import re
+import time
 import pandas as pd
 import httpx
 from fastapi import FastAPI, Request
@@ -10,7 +11,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Master Prompt Engine", version="430.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Session Cache & Hard Sanitizer Engine", version="440.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +21,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH BIẾN MÔI TRƯỜNG
+# CẤU HÌNH BIẾN MÔI TRƯỜNG & SESSION CACHE
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "").strip()
@@ -31,6 +32,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 
 RAM_CACHE = {}
+# Bộ nhớ tạm lưu tên thiết bị theo ID phòng chat Google Chat để chống mất trí nhớ
+GOOGLE_CHAT_SESSION_CACHE = {} 
 
 TABS_PUBLIC = [
     "1_THIET_BI_VA_LOI", 
@@ -44,7 +47,7 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO HTTP CLIENT & DÒ MODEL CEREBRAS
+# KHỜI TẠO HTTP CLIENT & DÒ MODEL CEREBRAS
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
@@ -111,7 +114,7 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "430.0",
+        "version": "440.0",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -125,6 +128,44 @@ async def reload_data():
 class ChatRequest(BaseModel):
     messages: list
     role: str = "Khach_Hang"
+
+# ------------------------------------------------------------------------------
+# BỘ LỌC CỨNG (HARD SANITIZER) XÓA SẠCH BƯỚC LOCAL PRINTER & CONTROL PANEL
+# ------------------------------------------------------------------------------
+def clean_thinking_process(text: str) -> str:
+    if "Here's a thinking process:" in text:
+        parts = text.split("Here's a thinking process:")
+        last_part = parts[-1]
+        match = re.search(r'(Dạ\s+|Xin chào|Trợ Lý KHO|\*\*|1\.|- )', last_part)
+        if match:
+            return last_part[match.start():].strip()
+    
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    text = re.sub(r'#{1,6}\s*', '', text)
+    text = re.sub(r'---+', '', text)
+    return text.strip()
+
+def sanitize_response_content(text: str) -> str:
+    """ Xóa bỏ hoàn toàn mọi câu rác về Add Local Printer / Control Panel """
+    raw_clean = clean_thinking_process(text)
+    
+    forbidden_keywords = [
+        "control panel", "add a local printer", "devices and printers", 
+        "use an existing port", "add printer or scanner", "thêm máy in (nếu không",
+        "thêm máy in thủ công"
+    ]
+    
+    lines = raw_clean.split("\n")
+    cleaned_lines = []
+    for line in lines:
+        line_lower = line.lower()
+        if any(kw in line_lower for kw in forbidden_keywords):
+            continue
+        cleaned_lines.append(line)
+        
+    res = "\n".join(cleaned_lines)
+    res = re.sub(r'\n{3,}', '\n\n', res)
+    return res.strip()
 
 # ------------------------------------------------------------------------------
 # TRÍCH XUẤT VÀ LÀM SẠCH DỮ LIỆU
@@ -188,22 +229,8 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
             if value: knowledge_text += f"- {key}: {value}\n"
     return knowledge_text
 
-def clean_thinking_process(text: str) -> str:
-    if "Here's a thinking process:" in text:
-        parts = text.split("Here's a thinking process:")
-        last_part = parts[-1]
-        match = re.search(r'(Dạ\s+|Xin chào|Trợ Lý KHO|\*\*|1\.|- )', last_part)
-        if match:
-            return last_part[match.start():].strip()
-    
-    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-    # Lọc bỏ các dấu kẻ bảng hoặc tiêu đề ### thừa nếu AI cố tình xuất ra
-    text = re.sub(r'#{1,6}\s*', '', text)
-    text = re.sub(r'---+', '', text)
-    return text.strip()
-
 # ------------------------------------------------------------------------------
-# PROMPT CHUẨN MASTER DỰA TRÊN KHUNG YÊU CẦU CỦA ANH
+# SYSTEM PROMPT BẮT LỢI CẮT NGẮN CÀI DRIVER
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
@@ -211,7 +238,6 @@ def build_smart_system_prompt(knowledge_context: str) -> str:
 Bạn là **Trợ Lý KHO Sapo** – Chuyên gia IT cao cấp phụ trách kỹ thuật phần cứng (máy in đơn hàng, máy in tem, máy quét mã vạch, thiết bị POS...).
 - **Phong thái:** Thực chiến, nhạy bén, điềm tĩnh, chuyên nghiệp như một Kỹ thuật viên IT lâu năm.
 - **Xưng hô:** Xưng "Em", gọi người dùng là "Anh/chị".
-- **Tư duy cốt lõi (Root Cause Analysis):** Phân tích sự cố theo hướng: Phần cứng ➔ Phần mềm ➔ Kết nối. Hướng dẫn bước ĐƠN GIẢN TRƯỚC, BỚT PHỨC TẠP SAU.
 
 ---
 
@@ -224,31 +250,32 @@ Bạn là **Trợ Lý KHO Sapo** – Chuyên gia IT cao cấp phụ trách kỹ 
   2. 📱 **Cài đặt in qua Điện thoại / Máy POS** (App XTEST / Kết nối LAN / Đổi IP)
   3. 🛠️ **Khắc phục sự cố** (Không cắt giấy, in ra giấy trắng, nghẽn mạng, báo đèn đỏ...)"
 
-### KỊCH BẢN B: XỬ LÝ SỰ CỐ / BÁO LỖI KỸ THUẬT / CẦN CÀI ĐẶT CỤ THỂ (Ví dụ: "cài driver spr02", "in ra giấy trắng")
+### KỊCH BẢN B: XỬ LÝ SỰ CỐ / BÁO LỖI KỸ THUẬT / CẦN CÀI ĐẶT CỤ THỂ (Ví dụ: "cài driver spr02", "in ra giấy trắng", "1", "driver máy tính nhé")
 - **HÀNH ĐỘNG:** 
   1. Trả lời trực diện giải pháp dựa 100% VÀO NỘI DUNG TRONG KHO DỮ LIỆU.
-  2. Hướng dẫn cài đặt Driver: BẮT BỘ hướng dẫn chạy trực tiếp file cài đặt `.exe` (Windows) hoặc `.dmg` (macOS) rồi nhấn Next/Install. **TUYỆT ĐỐI CẤM** hướng dẫn add máy in thủ công bằng Windows Control Panel ("Add a local printer").
+  2. **QUY TRÌNH CÀI DRIVER MÁY TÍNH CHUẨN KHO SAPO (CHỈ GỒM 3 BƯỚC):**
+     - **Bước 1 (Tải driver):** Cung cấp link tải tương ứng cho Windows/macOS.
+     - **Bước 2 (Cài đặt):** Mở file vừa tải về (`.exe` hoặc `.dmg`), nhấn Next ➔ Install ➔ Finish để hoàn tất.
+     - **Bước 3 (In thử):** Kết nối cáp USB và in thử Test Page.
+     - **TUYỆT ĐỐI CẤM:** Không hướng dẫn mở Control Panel, Devices and Printers, hay Add a local printer!
   3. Đính kèm ĐẦY ĐỦ link Driver/Tài liệu/Video tương ứng từ Kho dữ liệu bên dưới.
 
 ### KỊCH BẢN C: THIẾU THÔNG TIN THIẾT BỊ (ĐIỀN KHUYẾT THÔNG MINH) (Ví dụ: "cài máy in hóa đơn")
 - **HÀNH ĐỘNG:** 
-  - Nếu trong các tin nhắn trước người dùng ĐÃ NÓI tên thiết bị: Dùng ngay tên thiết bị đó để xử lý theo Kịch bản B, TUYỆT ĐỐI KHÔNG HỎI LẠI.
-  - Nếu người dùng CHƯA NÓI tên thiết bị: Đưa quy trình xử lý chuẩn IT chung và hỏi khéo: *"Anh/chị cho em xin tên model máy (VD: SPR02, SPL01...) để em gửi chính xác link Driver và video thao tác nhé ạ!"*
-
-### KỊCH BẢN D: THIẾU DỮ LIỆU HOẶC MÁY NGOÀI DANH MỤC
-- **HÀNH ĐỘNG:** Đưa ra hướng xử lý IT căn bản và gợi ý liên hệ tổng đài Sapo.
+  - Nếu trong câu hỏi đã chứa tên máy (VD: SPR02): Sử dụng ngay Kịch bản B, KHÔNG ĐƯỢC hỏi lại model máy in nữa!
+  - Nếu thực sự chưa có tên máy: Hỏi khéo: *"Anh/chị cho em xin tên model máy (VD: SPR02, SPL01...) để em gửi chính xác link Driver và video thao tác nhé ạ!"*
 
 ---
 
 # LUẬT THÉP BẢO VỆ DỮ LIỆU & CHỐNG LỖI HIỂN THỊ (STRICT GUARDRAILS)
 
 1. **Ngôn ngữ chuẩn 100% Tiếng Việt:** TUYỆT ĐỐI KHÔNG xuất ra dòng suy nghĩ bằng tiếng Anh.
-2. **Kiểm soát Link tuyệt đối (Zero Hallucinated URLs):** CHỈ CUNG CẤP LINK nếu link đó có mặt 100% chính xác trong KHO DỮ LIỆU.
-3. **CẤM DÙNG BẢNG VÀ TIÊU ĐỀ KẺ NGANG (Tránh văng lỗi Google Chat):**
-   - **CẤM HOÀN TOÀN** dùng bảng Markdown (`| ... |`). Hãy liệt kê link dạng gạch đầu dòng:
+2. **Kiểm soát Link tuyệt đối:** CHỈ CUNG CẤP LINK nếu link đó có mặt 100% chính xác trong KHO DỮ LIỆU.
+3. **CẤM DÙNG BẢNG VÀ TIÊU ĐỀ KẺ NGANG:**
+   - KHÔNG dùng bảng Markdown (`| ... |`). Liệt kê link dạng gạch đầu dòng emoji:
      - 🔹 **Driver Windows:** `<Link>`
      - 🔹 **Driver macOS:** `<Link>`
-   - **CẤM HOÀN TOÀN** dùng dấu băm tiêu đề (`#`, `##`, `###`) và thanh kẻ ngang (`---`). Hãy dùng chữ in đậm và Emoji để phân đoạn.
+   - KHÔNG dùng dấu băm (`#`, `##`, `###`) hay thanh kẻ (`---`).
 
 ---
 
@@ -276,7 +303,7 @@ async def call_gemini_with_retry(system_instruction: str, user_message: str) -> 
         if res.status_code == 200:
             data = res.json()
             raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
-            return clean_thinking_process(raw_text)
+            return sanitize_response_content(raw_text)
     except Exception: pass
 
     return "👋 Dạ em chào anh/chị! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ cài đặt hay tra cứu thiết bị nào ạ?"
@@ -298,22 +325,20 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
             res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=3.5)
             if res.status_code == 200:
                 data = res.json()
-                return clean_thinking_process(data["choices"][0]["message"]["content"])
+                return sanitize_response_content(data["choices"][0]["message"]["content"])
         except Exception: pass
 
     return await call_gemini_with_retry(system_instruction, user_message)
 
 def wrap_gsuite_addon_response(text_message: str) -> dict:
-    # Làm sạch triệt để Markdown rác cho Google Chat
-    clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', text_message)
-    clean_text = re.sub(r'#{1,6}\s*', '', clean_text)
-    clean_text = re.sub(r'---+', '', clean_text)
+    clean_text = sanitize_response_content(text_message)
+    clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', clean_text)
     return {
         "hostAppDataAction": {
             "chatDataAction": {
                 "createMessageAction": {
                     "message": {
-                        "text": clean_text.strip()
+                        "text": clean_text
                     }
                 }
             }
@@ -361,6 +386,7 @@ async def chat_stream(req: ChatRequest):
             }
             try:
                 cerebras_timeout = httpx.Timeout(10.0, connect=2.5)
+                full_stream_text = ""
                 async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload, timeout=cerebras_timeout) as response:
                     if response.status_code == 200:
                         async for line in response.aiter_lines():
@@ -373,10 +399,14 @@ async def chat_stream(req: ChatRequest):
                                     if choices:
                                         chunk = choices[0].get("delta", {}).get("content", "")
                                         if chunk and not chunk.startswith("<think>"):
-                                            has_yielded = True
-                                            yield chunk
+                                            full_stream_text += chunk
                                 except Exception: pass
-                        if has_yielded:
+                        
+                        # Lọc rác bọc lại trước khi nhả ra client
+                        clean_output = sanitize_response_content(full_stream_text)
+                        if clean_output:
+                            has_yielded = True
+                            yield clean_output
                             return
             except Exception: pass
 
@@ -387,7 +417,7 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
 # ------------------------------------------------------------------------------
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat)
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - CÓ THÊM BỘ NHỚ PHIÊN SESSION CACHE
 # ------------------------------------------------------------------------------
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -395,6 +425,9 @@ async def google_chat_webhook(request: Request):
         event = await request.json()
         user_message = extract_user_text(event)
         cleaned_message = re.sub(r'<.*?>', '', user_message).replace("@Trợ Lý KHO Sapo", "").strip()
+
+        # Lấy ID duy nhất của phòng chat hoặc user để lưu Session
+        space_id = event.get("space", {}).get("name") or event.get("user", {}).get("name") or "default_space"
 
         event_type = event.get("type") or event.get("chat", {}).get("type") or ""
         if event_type == "ADDED_TO_SPACE":
@@ -404,10 +437,30 @@ async def google_chat_webhook(request: Request):
         if not cleaned_message or any(g == cleaned_message.lower() for g in quick_greetings) or "chào" in cleaned_message.lower():
             return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"))
 
-        focused_knowledge = get_high_precision_knowledge(cleaned_message, role="Sale")
+        # DÒ TÌM VÀ CẬP NHẬT TÊN MÁY VÀO SESSION CACHE
+        query_lower = cleaned_message.lower()
+        found_device = None
+        for tab in TABS_PUBLIC:
+            for row in RAM_CACHE.get(tab, []):
+                dev_name = str(row.get("Ten_Thiet_Bi", "")).strip()
+                if dev_name and dev_name.lower() in query_lower:
+                    found_device = dev_name
+                    break
+            if found_device: break
+
+        if found_device:
+            GOOGLE_CHAT_SESSION_CACHE[space_id] = found_device
+        
+        # NẾU NGƯỜI DÙNG CHỈ GÕ "1", "2", "3" HOẶC "DRIVER MÁY TÍNH", TỰ ĐỘNG GHÉP VỚI TÊN MÁY ĐÃ LƯU TRONG SESSION
+        cached_device = GOOGLE_CHAT_SESSION_CACHE.get(space_id)
+        final_query = cleaned_message
+        if cached_device and (cleaned_message in ["1", "2", "3", "1.", "2.", "3."] or "driver" in query_lower or "máy tính" in query_lower or "điện thoại" in query_lower):
+            final_query = f"Thiết bị {cached_device}: {cleaned_message}"
+
+        focused_knowledge = get_high_precision_knowledge(final_query, role="Sale")
         system_instruction = build_smart_system_prompt(focused_knowledge)
 
-        ai_response = await call_llm_single(system_instruction, cleaned_message)
+        ai_response = await call_llm_single(system_instruction, final_query)
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
     except Exception:
