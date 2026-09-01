@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Rate-Limit Safe Engine", version="1100.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Ultimate Perfect Engine", version="1300.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,8 +100,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "1100.0", 
-        "engine": "Cerebras Rate-Limit Safe",
+        "version": "1300.0", 
+        "engine": "Ultimate Perfect Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -126,7 +126,7 @@ def clean_thinking_process(text: str) -> str:
     text = re.sub(r'#{1,6}\s*', '', text)
     text = re.sub(r'---+', '', text)
     
-    # 🎯 KHỬ SẠCH MÃ LATEX MŨI TÊN DÍNH CÂU
+    # Khử sạch mã LaTeX mũi tên dính câu
     text = re.sub(r'\$\\rightarrow\$|\\rightarrow|\$\\Rightarrow\$|\\Rightarrow', '➔', text)
     
     return text.strip()
@@ -204,7 +204,7 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
     return knowledge_text
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG
+# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG & ÉP DÙNG LINK TỪNG BƯỚC (INLINE)
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
@@ -215,7 +215,7 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
 
 1. TRƯỜNG HỢP 1: CÂU HỎI MẬP MỜ / CHỈ NÓI TÊN THIẾT BỊ / CHỈ NÓI TÊN CHÍNH SÁCH
 (Ví dụ: "spr02", "k200l", "chính sách đổi trả", "máy in xprinter", "bảo hành"):
-👉 TUYỆT ĐỐI KHÔNG tự đoán mò nhu cầu! KHÔNG xả ngay bài hướng dẫn dài dòng hay tự ý gán kịch bản cài mobile/PC!
+👉 TUYỆT ĐỐI KHÔNG tự đoán mò nhu cầu! KHÔNG xả ngay bài hướng dẫn dài dòng!
 👉 BẮT BUỘC hỏi lại 1 câu khoanh vùng nhu cầu:
    - Nếu là THIẾT BỊ (Ví dụ: SPR02, K200L...):
      "Dạ, với thiết bị **[Tên thiết bị]**, anh/chị cần em hỗ trợ mục nào dưới đây ạ?
@@ -225,18 +225,26 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
    - Nếu là CHÍNH SÁCH / NỘI BỘ (Bảo hành, Thu hồi, Chiết khấu...):
      "Dạ, về **[Chủ đề]**, anh/chị đang cần tra cứu quy định hoặc hướng dẫn cụ thể nào ạ?"
 
-2. TRƯỜNG HỢP 2: CÂU HỎI ĐÃ CÓ Ý ĐỊNH RÕ RÀNG
-(Ví dụ: "cài driver spr02 máy tính", "cài trên app xtest nhé", "chính sách bảo hành 12 tháng"):
-👉 Trả lời TRỰC DIỆN, tóm tắt 3-4 bước ngắn gọn, rõ ràng.
-👉 ĐÍNH KÈM TÀI LIỆU CÓ THỰC VÀ MATCH 100%:
-   - Đang hỏi CÀI TRÊN ĐIỆN THOẠI ➔ CHỈ đính kèm link/video App Mobile. TUYỆT ĐỐI CẤM gửi link Driver Win/Mac hoặc ảnh màn hình Windows Properties!
-   - Đang hỏi CÀI TRÊN MÁY TÍNH ➔ CHỈ đính kèm link Driver Win/Mac & video thao tác PC.
-   - Đang hỏi SỬA LỖI / CHÍNH SÁCH ➔ Trích xuất đúng thông tin trong Kho dữ liệu.
+2. TRƯỜNG HỢP 2: CÂU HỎI ĐÃ CÓ Ý ĐỊNH RÕ RÀNG HOẶC HỎI SỬA LỖI
+(Ví dụ: "cài driver spr02 máy tính", "spr02 in ra giấy trắng", "chính sách bảo hành 12 tháng"):
+👉 Trả lời TRỰC DIỆN từng bước khắc phục/cài đặt.
+
+👉 🛑 QUY TẮC ĐÍNH KÈM LINK TỪNG BƯỚC (INLINE STEP-LINK RULE):
+   - Nếu trong ô Dữ liệu gốc ở MỖI BƯỚC CÓ ĐÍNH KÈM LINK ẢNH / LINK VIDEO RIÊNG (Ví dụ: Bước 1 có link ảnh 1, Bước 2 có link ảnh 2):
+     -> AI BẮT BUỘC phải đặt link ảnh/video đó NGAY DƯỚI BƯỚC TƯƠNG ỨNG! 
+     -> Ví dụ trình bày:
+        1. **Kiểm tra chiều giấy:** Kiểm tra xem cuộn giấy đã lắp đúng chiều chưa.
+           👉 Hình ảnh hướng dẫn: <Link ảnh bước 1 trong dữ liệu>
+        2. **Vệ sinh đầu in:** Kiểm tra khu vực đầu in xem có mảnh giấy thừa che khuất hay không.
+           👉 Hình ảnh hướng dẫn: <Link ảnh bước 2 trong dữ liệu>
+        3. **Thay thử giấy:** Đổi sang cuộn giấy mới nếu 2 cách trên không được.
+   - TUYỆT ĐỐI KHÔNG GỘM NGUYÊN ĐỐNG LINK VỀ CUỐI BÀI!
+   - TUYỆT ĐỐI KHÔNG BỎ SÓT BẤT KỲ LINK NÀO CÓ TRONG DỮ LIỆU GỐC!
 
 3. LUẬT THÉP ĐỊNH DẠNG:
 - TUYỆT ĐỐI CẤM sử dụng mã LaTeX toán học (như $\\rightarrow$, $\\Rightarrow$). Dùng dấu mũi tên "➔" hoặc "->".
 - Không tự bịa bước Control Panel hay thao tác phần cứng nếu dữ liệu không có.
-- Không tự bịa link URL giả.
+- Chỉ cung cấp đường link có thực trong Kho dữ liệu dưới đây.
 
 ---
 
@@ -245,7 +253,7 @@ KHO DỮ LIỆU GỐC SAPO:
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI CEREBRAS LLM VỚI BỘ LỌC CẮT LỖI 429 VÀ CHUYỂN GEMINI
+# HÀM GỌI LLM CÓ BẢO VỆ CHỐNG TRẢ VỀ CÂU CHÀO KHI LỖI
 # ------------------------------------------------------------------------------
 async def call_llm_with_history(system_instruction: str, messages_list: list) -> str:
     messages_payload = [{"role": "system", "content": system_instruction}]
@@ -253,14 +261,14 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         role_type = "user" if m.get("role") in ["user", "Khach_Hang"] else "assistant"
         messages_payload.append({"role": role_type, "content": m.get("text", "")})
 
-    # 1. GỌI CEREBRAS API DEDICATED
+    # 1. THỬ GỌI CEREBRAS API
     if CEREBRAS_API_KEY and CEREBRAS_MODEL:
         url = "https://api.cerebras.ai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"}
         payload = {
             "model": CEREBRAS_MODEL,
             "messages": messages_payload,
-            "temperature": 0.6,
+            "temperature": 0.5,
             "top_p": 0.9,
             "max_tokens": 2000
         }
@@ -270,11 +278,11 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
                 data = res.json()
                 return clean_thinking_process(data["choices"][0]["message"]["content"])
             else:
-                print(f"⚠️ Cerebras trả về status {res.status_code}: {res.text}")
+                print(f"⚠️ Cerebras lỗi status {res.status_code}: {res.text}")
         except Exception as e:
-            print(f"⚠️ Cerebras exception: {str(e)}")
+            print(f"⚠️ Cerebras Exception: {str(e)}")
 
-    # 2. DỰ PHÒNG GEMINI NẾU CEREBRAS BỊ 429 HOẶC LỖI MẠNG
+    # 2. DỰ PHÒNG CHUYỂN SANG GEMINI NẾU CEREBRAS NGHẼN/BẬN
     if GEMINI_API_KEY:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
@@ -294,10 +302,13 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
                 data = res.json()
                 raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
                 return clean_thinking_process(raw_text)
-        except Exception: pass
+            else:
+                print(f"⚠️ Gemini lỗi status {res.status_code}: {res.text}")
+        except Exception as e:
+            print(f"⚠️ Gemini Exception: {str(e)}")
 
-    # 🎯 THÔNG BÁO BẬN/QUÁ TẢI (KHÔNG CÒN TRẢ LỜI BẰNG CÂU CHÀO MẶC ĐỊNH)
-    return "⚠️ Hệ thống AI hiện đang quá tải lượt truy cập (Lỗi 429). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
+    # 🎯 THÔNG BÁO BẬN CHUẨN XÁC KHI NGHẼN MẠNG (KHÔNG TRẢ VỀ CÂU CHÀO MẶC ĐỊNH)
+    return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
 
 def wrap_gsuite_addon_response(text_message: str) -> dict:
     clean_text = clean_thinking_process(text_message)
@@ -323,8 +334,9 @@ async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
     clean_q = re.sub(r'[^\w\s]', '', latest_msg.lower()).strip()
     
-    quick_greetings = ["chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe"]
-    if clean_q in quick_greetings or "chào" in clean_q or "chao" in clean_q:
+    # Chỉ bắt chào khi câu gõ DUY NHẤT chứa từ chào
+    exact_quick_greetings = {"chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe", "xin chào"}
+    if clean_q in exact_quick_greetings:
         async def greeting_gen():
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
@@ -357,8 +369,10 @@ async def google_chat_webhook(request: Request):
         if event_type == "ADDED_TO_SPACE":
             return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!"))
 
-        quick_greetings = ["chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
-        if not cleaned_message or any(g == cleaned_message.lower() for g in quick_greetings) or "chào" in cleaned_message.lower():
+        # Bắt chào chính xác (Không bắt bừa khi câu hỏi dài)
+        exact_quick_greetings = {"chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe", "xin chào"}
+        clean_user_q = re.sub(r'[^\w\s]', '', cleaned_message.lower()).strip()
+        if not cleaned_message or clean_user_q in exact_quick_greetings:
             return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"))
 
         if space_id not in GOOGLE_CHAT_HISTORY:
@@ -380,4 +394,5 @@ async def google_chat_webhook(request: Request):
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
     except Exception:
+        # Nếu nổ lỗi hệ thống ngoài dự kiến, báo bận chứ KHÔNG trả về câu chào
         return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"))
