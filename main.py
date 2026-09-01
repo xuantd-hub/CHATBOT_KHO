@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Cerebras Perfect Engine", version="240.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Auto-Discovery Engine", version="250.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,11 +20,13 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH BIẾN MÔI TRƯỜNG & TÊN MODEL CHUẨN CEREBRAS
+# CẤU HÌNH BIẾN MÔI TRƯỜNG
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "csk-xyrjt5mej95fexmh9f9w2yprrt4wttjyrfy9pv9hc2jjv66d").strip()
-CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "llama3.3-70b").strip() # Đã sửa chuẩn tên model Cerebras
+CEREBRAS_MODEL = "gemma-4-31b"
+AVAILABLE_CEREBRAS_MODELS = []
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 
@@ -42,21 +44,47 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO HTTP CLIENT (TIMEOUT RÚT NGẮN ĐỂ CHUYỂN DỰ PHÒNG TỨC THÌ)
+# KHỞI TẠO HTTP CLIENT & DÒ TÌM MODEL CEREBRAS THỰC TẾ
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
     global HTTP_CLIENT
     HTTP_CLIENT = httpx.AsyncClient(
-        timeout=httpx.Timeout(15.0, read=45.0),
+        timeout=httpx.Timeout(10.0, read=45.0),
         limits=httpx.Limits(max_keepalive_connections=30, max_connections=100)
     )
     asyncio.create_task(load_sheet_data_async())
+    await discover_active_cerebras_models()
 
 @app.on_event("shutdown")
 async def shutdown_event():
     if HTTP_CLIENT:
         await HTTP_CLIENT.aclose()
+
+async def discover_active_cerebras_models():
+    """ Tự động lấy danh sách model thực tế từ tài khoản Cerebras của anh """
+    global CEREBRAS_MODEL, AVAILABLE_CEREBRAS_MODELS
+    if not CEREBRAS_API_KEY:
+        return
+
+    url = "https://api.cerebras.ai/v1/models"
+    headers = {"Authorization": f"Bearer {CEREBRAS_API_KEY}"}
+    try:
+        res = await HTTP_CLIENT.get(url, headers=headers, timeout=5.0)
+        if res.status_code == 200:
+            models_data = res.json().get("data", [])
+            model_ids = [m["id"] for m in models_data]
+            AVAILABLE_CEREBRAS_MODELS = model_ids
+            
+            # Ưu tiên các model Cerebras thực tế có sẵn
+            if model_ids:
+                CEREBRAS_MODEL = model_ids[0]
+                for m_id in model_ids:
+                    if "llama" in m_id.lower() or "gemma" in m_id.lower() or "gpt" in m_id.lower():
+                        CEREBRAS_MODEL = m_id
+                        break
+    except Exception:
+        pass
 
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
@@ -84,8 +112,9 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "240.0",
+        "version": "250.0",
         "active_cerebras_model": CEREBRAS_MODEL,
+        "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "backup_gemini_model": GEMINI_MODEL
     }
 
@@ -233,7 +262,7 @@ Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên k
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI GEMINI 3.6 FLASH DỰ PHÒNG
+# HÀM GỌI GEMINI 3.6 FLASH DỰ PHÒNG CỰC NHANH
 # ------------------------------------------------------------------------------
 async def call_gemini_api(system_prompt: str, user_msg: str) -> str:
     if not GEMINI_API_KEY:
@@ -261,7 +290,7 @@ async def call_gemini_api(system_prompt: str, user_msg: str) -> str:
     return "👋 Máy chủ AI đang tạm thời bận, anh/chị vui lòng gửi lại câu hỏi sau vài giây nhé ạ!"
 
 async def call_llm_single(system_instruction: str, user_message: str) -> str:
-    if CEREBRAS_API_KEY:
+    if CEREBRAS_API_KEY and CEREBRAS_MODEL:
         url = "https://api.cerebras.ai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"}
         payload = {
@@ -274,7 +303,7 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
             "max_tokens": 2000
         }
         try:
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=4.0)
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=3.0)
             if res.status_code == 200:
                 data = res.json()
                 return clean_thinking_process(data["choices"][0]["message"]["content"])
@@ -319,8 +348,8 @@ async def chat_stream(req: ChatRequest):
     async def generate_response_stream():
         has_yielded = False
         
-        # 1. THỬ CEREBRAS CLOUD STREAMING (TIMEOUT 3.5S ĐỂ CHUYỂN DỰ PHÒNG TỨC THÌ)
-        if CEREBRAS_API_KEY:
+        # 1. CEREBRAS STREAMING VỚI MODEL ĐỘNG DÒ TÌM ĐƯỢC
+        if CEREBRAS_API_KEY and CEREBRAS_MODEL:
             messages_payload = [{"role": "system", "content": system_instruction}]
             trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
             for m in trimmed:
@@ -337,7 +366,7 @@ async def chat_stream(req: ChatRequest):
                 "stream": True
             }
             try:
-                async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload, timeout=3.5) as response:
+                async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload, timeout=2.5) as response:
                     if response.status_code == 200:
                         async for line in response.aiter_lines():
                             if line and line.startswith("data: "):
@@ -356,7 +385,7 @@ async def chat_stream(req: ChatRequest):
                             return
             except Exception: pass
 
-        # 2. NẾU CEREBRAS LỖI HOẶC CHẬM ➔ CHUYỂN SANG GEMINI 3.6 FLASH NAY TỨC THÌ
+        # 2. CHUYỂN SANG GEMINI DỰ PHÒNG NẾU CEREBRAS BẬN (TIMEOUT RÚT NGẮN 2.5S)
         if not has_yielded:
             fallback_ans = await call_gemini_api(system_instruction, combined_query)
             yield fallback_ans
