@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Full Unified Engine", version="1900.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Smart Platform & Aesthetics Engine", version="2000.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,8 +100,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "1900.0", 
-        "engine": "Full Unified Engine",
+        "version": "2000.0", 
+        "engine": "Smart Platform & Aesthetics Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -160,7 +160,7 @@ def extract_user_text(event: dict) -> str:
     return deep_search(event)
 
 # ------------------------------------------------------------------------------
-# BÓC TÁCH THIẾT BỊ HOẶC LOẠI MÁY IN TỪ LỊCH SỬ CHAT
+# BÓC TÁCH THIẾT BỊ HOẶC HỆ ĐIỀU HÀNH TỪ LỊCH SỬ CHAT
 # ------------------------------------------------------------------------------
 def extract_device_info_from_history(messages: list) -> tuple:
     device_models = ["spr02", "spr01", "k200l", "k200u", "a868", "hprt", "80fe", "spl01", "xp350b", "g8", "a160m", "xprinter", "imin"]
@@ -189,13 +189,23 @@ def extract_device_info_from_history(messages: list) -> tuple:
 
     return detected_model, detected_category
 
+def extract_platform_intent(messages: list) -> str:
+    # Soi lại các câu nói gần nhất của người dùng để bắt HĐH
+    user_text = " ".join([m.get("text", "") for m in messages if m.get("role") in ["user", "Khach_Hang"]][-3:]).lower()
+    if any(k in user_text for k in ["windows", "win", "win10", "win11", "win7", "máy tính"]):
+        return "windows"
+    elif any(k in user_text for k in ["mac", "macbook", "macos"]):
+        return "mac"
+    elif any(k in user_text for k in ["điện thoại", "mobile", "app", "xtest", "android", "ios", "iphone", "lan"]):
+        return "mobile"
+    return ""
+
 # ------------------------------------------------------------------------------
-# TRÍCH XUẤT DỮ LIỆU RAG VỚI LỊCH SỬ GỘP TOÀN BỘ CÂU HỎI CỦA KHÁCH
+# TRÍCH XUẤT DỮ LIỆU RAG VỚI BỘ BẮT HỆ ĐIỀU HÀNH THÔNG MINH
 # ------------------------------------------------------------------------------
 def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     
-    # Gộp toàn bộ câu hỏi của khách trong phiên chat để duy trì từ khóa sự cố
     user_texts = [m.get("text", "") for m in messages_list if m.get("role") in ["user", "Khach_Hang"]]
     combined_user_text = " ".join(user_texts).lower()
     
@@ -203,10 +213,11 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     latest_lower = latest_msg.lower()
 
     detected_model, detected_category = extract_device_info_from_history(messages_list)
+    platform_intent = extract_platform_intent(messages_list)
     has_device_info = bool(detected_model or detected_category)
 
-    # Nhận diện Ý định dựa trên tin nhắn MỚI NHẤT và TOÀN BỘ phiên chat
-    is_setup_intent = any(k in latest_lower for k in ["cài", "driver", "xtest", "app", "điện thoại", "máy tính", "kết nối", "lan", "ip", "setup"])
+    # Nhận diện Ý định
+    is_setup_intent = any(k in combined_user_text for k in ["cài", "driver", "xtest", "app", "điện thoại", "máy tính", "kết nối", "lan", "ip", "setup", "windows", "mac"])
     is_error_intent = any(k in combined_user_text for k in ["lỗi", "không", "kẹt", "hư", "trắng", "mực", "cắt", "sự cố", "sửa", "ra mực", "không ra"])
     is_policy_intent = any(k in combined_user_text for k in ["bảo hành", "đổi trả", "chính sách", "thu hồi"])
 
@@ -224,10 +235,21 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
             row_text = " ".join(str(v).lower() for v in row.values())
             score = tab_bonus
             
+            # Khớp tên thiết bị
             if detected_model and detected_model in row_text:
                 score += 300
             if detected_category and detected_category in row_text:
                 score += 150
+
+            # 🎯 BỘ THƯỞNG ĐIỂM HỆ ĐIỀU HÀNH CHÍNH XÁC KHÔNG LỆCH
+            if tab == "2_HUONG_DAN_CAI_DAT" and platform_intent:
+                row_thao_tac = str(row.get("Loai_Thao_Tac", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower()
+                if platform_intent == "windows" and ("win" in row_thao_tac or "windows" in row_thao_tac):
+                    score += 800
+                elif platform_intent == "mac" and "mac" in row_thao_tac:
+                    score += 800
+                elif platform_intent == "mobile" and any(k in row_thao_tac for k in ["app", "xtest", "lan", "điện thoại", "mobile"]):
+                    score += 800
             
             for w in words:
                 if w in row_text:
@@ -239,7 +261,7 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     scored_rows.sort(key=lambda x: x[0], reverse=True)
     top_matches = scored_rows[:3]
 
-    knowledge_text = f"HAS_DEVICE_INFO: {has_device_info}\nDETECTED_MODEL: {detected_model}\nDETECTED_CATEGORY: {detected_category}\n"
+    knowledge_text = f"HAS_DEVICE_INFO: {has_device_info}\nDETECTED_MODEL: {detected_model}\nDETECTED_CATEGORY: {detected_category}\nPLATFORM_INTENT: {platform_intent}\n"
     for score, tab, row in top_matches:
         knowledge_text += f"\n=== DỮ LIỆU THUỘC TAB [{tab}] ===\n"
         for key, value in row.items():
@@ -249,12 +271,17 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     return knowledge_text, has_device_info
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG & BÁM SÁT 100% SHEET
+# SYSTEM PROMPT SIẾT ĐỊNH DẠNG ICON VÀ BỐ CỤC ĐẸP MẮT
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str, has_device_info: bool) -> str:
     return f"""
 Bạn là **Trợ Lý KHO Sapo** – Trợ lý AI cao cấp, có tư duy logic sâu sắc và am hiểu kỹ thuật thiết bị Sapo.
 Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghiệp, hành văn tự nhiên, rõ ràng.
+
+🎨 QUY TẮC BỐ CỤC TRÌNH BÀY ĐẸP MẮT & DỄ ĐỌC (PRESENTATION & ICONS RULE):
+- **Sử dụng Icon/Emoji sinh động** ở đầu các tiêu đề và từng bước thao tác (VD: 💻, 📱, 🛠️, 📌, ✅, 👉, 📄, 🎥, ⚠️).
+- **Chia nhỏ đoạn văn thoáng đãng**, dùng danh sách gạch đầu dòng (Bullet points).
+- **In đậm các từ khóa quan trọng**, tên nút bấm, tên bước (VD: **Bước 1: Tải Driver**, **Link Driver Windows:**).
 
 🎯 BỘ QUY TẮC XỬ LÝ QUAN TRỌNG NHẤT (TUÂN THỦ 100%):
 
@@ -270,17 +297,20 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
       Anh/chị cho em xin tên model cụ thể ghi trên máy để em gửi hướng dẫn chuẩn 100% cho mình nhé!"
 
 2. 🛑 TRƯỜNG HỢP 2: KHI ĐÃ CÓ TÊN MODEL MÁY HOẶC ĐÃ NÓI RÕ LOẠI MÁY IN (`HAS_DEVICE_INFO: True`):
-   - **BÁM SÁT 100% NỘI DUNG SHEET:** BẮT BUỘC phải trích xuất chính xác từng câu, từng bước và link ảnh có trong cột `Cach_Khac_Phuc` của Dữ liệu bên dưới.
-   - **TUYỆT ĐỐI CẤM TỰ BỊA KIẾN THỨC BÊN NGOÀI:** Không tự giải thích lý thuyết in nhiệt, đảo cuộn giấy hay nói về giấy tem nếu trong dữ liệu gốc của dòng đó không yêu cầu!
+   - **BÁM SÁT 100% NỘI DUNG SHEET:** BẮT BUỘC phải trích xuất chính xác từng câu, từng bước và link có trong Dữ liệu bên dưới.
+   - Nếu người dùng hỏi cài trên **Windows**, CHỈ gửi bài hướng dẫn cài Driver Windows từ Sheet.
+   - Nếu người dùng hỏi cài trên **Điện thoại / App / LAN**, CHỈ gửi bài hướng dẫn Mobile/App từ Sheet.
 
-👉 🛑 QUY TẮC ĐÍNH KÈM LINK TỪNG BƯỚC (INLINE STEP-LINK RULE):
-   - Nếu ở MỖI BƯỚC CÓ ĐÍNH KÈM LINK ẢNH / LINK VIDEO RIÊNG:
-     -> AI BẮT BUỘC phải đặt link ảnh/video đó NGAY DƯỚI BƯỚC TƯƠNG ỨNG!
-     -> TUYỆT ĐỐI KHÔNG GỘM NGUYÊN ĐỐNG LINK VỀ CUỐI BÀI!
+👉 🛑 QUY TẮC ĐÍNH KÈM LINK VÀ NỘI DUNG SHEET:
+   - Xuất đầy đủ các cột link nếu có trong dòng dữ liệu:
+     - 📄 **Tài liệu / Bài viết hướng dẫn:** <Link trong Sheet>
+     - 💻 **Link Tải Driver Windows:** <Link_Driver_Win trong Sheet>
+     - 🍏 **Link Tải Driver Mac:** <Link_Driver_Mac trong Sheet>
+     - 🎥 **Video Hướng Dẫn:** <Link_Video_Huong_Dan trong Sheet>
+     - ⚠️ **Lưu ý quan trọng:** <Luu_y trong Sheet>
 
 🧠 QUY TẮC DUY TRÌ BỐI CẢNH (Context Memory):
-   - Khi người dùng đã cung cấp tên model (VD: SPR02 hay SPL01) ở các câu trước -> BẮT BUỘC phải giữ nguyên bối cảnh model đó cho toàn bộ các câu hỏi phía sau.
-   - Khi chuyển từ Sửa lỗi sang Cài đặt (hoặc ngược lại) -> Giữ nguyên model và dẫn dắt tự nhiên bằng 1 câu ngắn ở đầu bài trước khi xuất hướng dẫn.
+   - Khi người dùng đã cung cấp tên model (VD: SPR02 hay K200L) ở các câu trước -> BẮT BUỘC phải giữ nguyên bối cảnh model đó cho toàn bộ các câu hỏi phía sau.
 
 🛑 LUẬT THÉP ĐỊNH DẠNG:
 - TUYỆT ĐỐI CẤM sử dụng mã LaTeX toán học (như $\\rightarrow$, $\\Rightarrow$). Dùng dấu mũi tên "➔" hoặc "->".
