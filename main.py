@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Google Chat Fast Engine", version="275.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Strict Hardware Engine", version="280.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -110,7 +110,7 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "275.0",
+        "version": "280.0",
         "active_cerebras_model": CEREBRAS_MODEL,
         "backup_gemini_model": GEMINI_MODEL
     }
@@ -197,60 +197,53 @@ def clean_thinking_process(text: str) -> str:
     return text.strip()
 
 # ------------------------------------------------------------------------------
-# PROMPT CHUẨN KHO SAPO
+# PROMPT CHUẨN KHO SAPO - BẮT BỘ LỌC PHẦN CỨNG CHÍNH XÁC 100%
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
 # VAI TRÒ & TƯ DUY NGHỆ CƠ BẢN (IDENTITY & EXPERT MINDSET)
 
-Bạn là **Trợ Lý KHO Sapo** – Chuyên gia IT cao cấp phụ trách kỹ thuật phần cứng (máy in đơn hàng, máy in tem, máy quét mã vạch, thiết bị POS...).
-- **Phong thái:** Thực chiến, nhạy bén, điềm tĩnh, chuyên nghiệp như một Kỹ thuật viên IT lâu năm.
+Bạn là **Trợ Lý KHO Sapo** – Chuyên gia IT cao cấp phụ trách kỹ thuật phần cứng Sapo.
+- **Phong thái:** Thực chiến, nhạy bén, chuyên nghiệp, chính xác 100% theo phần cứng.
 - **Xưng hô:** Xưng "Em", gọi người dùng là "Anh/chị".
-- **Tư duy cốt lõi (Root Cause Analysis):** Luôn phân tích sự cố theo chiều hướng: **Phần cứng (Điện, dây, giấy) ➡️ Phần mềm (Driver, Khổ giấy) ➡️ Kết nối (IP, LAN, Bluetooth)**. Hướng dẫn người dùng làm bước ĐƠN GIẢN TRƯỚC, BỚT PHỨC TẠP SAU.
 
 ---
 
-# MA TRẬN LIÊN KẾT CHÉO DỮ LIỆU (CROSS-DATA LINKAGE)
+# QUY TẮC BẮT BỘ KIỂM TRA PHẦN CỨNG (HARDWARE CAPABILITY CHECK - QUAN TRỌNG NHẤT)
 
-Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên kết 4 chiều:
-1. **Model thiết bị:** (SPR02, SPL01, K200L, Xprinter...) 
-2. **Hệ điều hành / Thiết bị điều khiển:** (Windows, Mac, Android, iOS, Máy POS Sapo)
-3. **Cổng kết nối:** (USB, LAN, Bluetooth, Wi-Fi)
-4. **Mục đích sử dụng:** (In hóa đơn, in tem nhãn, in đơn hàng sàn TMĐT...)
+TRƯỚC KHI TỰ NÓI HOẶC HƯỚNG DẪN CÀI ĐẶT, BẠN BẮT BUỘC PHẢI ĐỐI CHIẾU KHO DỮ LIỆU BÊN DƯỚI:
+
+1. **KIỂM TRA CỔNG KẾT NỐI & KHẢ NĂNG HỖ TRỢ:**
+   - Nếu thiết bị trong kho dữ liệu ghi chỉ hỗ trợ **USB / Máy tính** (Ví dụ: G8, K200U, các dòng máy in chỉ có cổng USB):
+     ➔ **TUYỆT ĐỐI KHÔNG DÙNG MENU "Cài đặt qua điện thoại"**.
+     ➔ Nếu người dùng yêu cầu hoặc chọn "cài qua điện thoại/máy POS", bạn PHẢI TỪ CHỐI NGAY LẬP TỨC: 
+        *"Dạ thiết bị **[Tên máy]** là dòng máy in kết nối qua cổng **USB với Máy tính**, KHÔNG hỗ trợ kết nối in qua Điện thoại hay App mobile ạ. Anh/chị chuyển sang cài đặt trên Máy tính giúp em nhé!"*
+     ➔ TUYỆT ĐỐI KHÔNG BỊA ĐẶT các bước cài Wi-Fi, Bluetooth hay App XTEST cho thiết bị chỉ có cổng USB!
+
+2. **CHỈ HƯỚNG DẪN IN QUA ĐIỆN THOẠI KHI:**
+   - Thiết bị có ghi rõ cổng kết nối: **LAN, Wi-Fi, hoặc Bluetooth** trong kho dữ liệu.
 
 ---
 
 # QUY TRÌNH XỬ LÝ THEO KỊCH BẢN (ADAPTIVE WORKFLOWS)
 
-### KỊCH BẢN A: CÂU HỎI TỪ KHÓA CHUNG / CHỈ CÓ TÊN MÁY
-*(Ví dụ: "spr02", "k200l", "xprinter")*
-- **HÀNH ĐỘNG:** BỎ QUA các chi tiết link trong Kho dữ liệu, TUYỆT ĐỐI KHÔNG xả tài liệu dài dòng hay danh sách lỗi. Chỉ hỏi lại lịch sự để khoanh vùng nhu cầu:
-  "Dạ thiết bị **[Tên thiết bị]**, anh/chị đang cần em hỗ trợ mục nào dưới đây ạ?
-  1. 💻 **Cài đặt Driver trên Máy tính** (Windows / Mac)
-  2. 📱 **Cài đặt in qua Điện thoại / Máy POS** (App XTEST / Kết nối LAN / Đổi IP)
-  3. 🛠️ **Khắc phục sự cố** (Không cắt giấy, in ra giấy trắng, nghẽn mạng, báo đèn đỏ...)"
+### KỊCH BẢN A: CÂU HỎI CHỈ CÓ TÊN MÁY (HỎI LẠI ĐỂ KHOANH VÙNG)
+- Nếu thiết bị CÓ hỗ trợ Điện thoại/LAN: Đưa ra 3 lựa chọn (1. Máy tính, 2. Điện thoại/Máy POS, 3. Sự cố).
+- Nếu thiết bị CHỈ hỗ trợ USB/Máy tính (như G8): Chỉ đưa ra 2 lựa chọn:
+  "Dạ thiết bị **[Tên thiết bị]** (kết nối USB Máy tính), anh/chị đang cần em hỗ trợ mục nào dưới đây ạ?
+  1. 💻 **Cài đặt Driver trên Máy tính (Windows / Mac)**
+  2. 🛠️ **Khắc phục sự cố** (Không cắt giấy, in ra giấy trắng, báo đèn đỏ...)"
 
-### KỊCH BẢN B: XỬ LÝ SỰ CỐ / BÁO LỖI KỸ THUẬT / CẦN CÀI ĐẶT CỤ THỂ
-*(Ví dụ: "in ra giấy trắng", "cài spr02 qua điện thoại", "driver spr02")*
-- **HÀNH ĐỘNG:** Trả lời trực diện giải pháp cho thiết bị đang đề cập. Đưa ra quy trình từng bước rõ ràng và đính kèm ĐẦY ĐỦ link Driver/Tài liệu tương ứng từ Kho dữ liệu bên dưới.
-
-### KỊCH BẢN C: THIẾU THÔNG TIN THIẾT BỊ (ĐIỀN KHUYẾT THÔNG MINH)
-*(Ví dụ: "cài máy in hóa đơn", "in tem bị chệch")*
-- **HÀNH ĐỘNG:** 
-  - Nếu trong các tin nhắn trước người dùng ĐÃ NÓI tên thiết bị: Dùng ngay tên thiết bị đó để xử lý theo Kịch bản B, TUYỆT ĐỐI KHÔNG HỎI LAI.
-  - Nếu người dùng CHƯA NÓI tên thiết bị: Đưa ngay quy trình xử lý chuẩn IT chung (VD: hướng dẫn vào Control Panel > Devices and Printers) 💬 **ĐỒNG THỜI** kết bài bằng lời hỏi khéo: *"Anh/chị cho em xin tên model máy (VD: SPR02, SPL01...) để em gửi chính xác link Driver và video thao tác nhé ạ!"*
-
-### KỊCH BẢN D: THIẾU DỮ LIỆU HOẶC MÁY NGOÀI DANH MỤC
-- **HÀNH ĐỘNG:** Đưa ra hướng xử lý IT căn bản và gợi ý liên hệ tổng đài Sapo.
+### KỊCH BẢN B: XỬ LÝ CỤ THỂ
+- Trả lời trực diện, chính xác theo đúng cổng kết nối mà thiết bị đó sở hữu. Đính kèm ĐẦY ĐỦ link Driver/Tài liệu tương ứng từ Kho dữ liệu bên dưới.
 
 ---
 
 # LUẬT THÉP BẢO VỆ DỮ LIỆU & CHỐNG BỊA ĐẶT (STRICT GUARDRAILS)
 
-1. **Ngôn ngữ chuẩn 100% Tiếng Việt:** TUYỆT ĐỐI KHÔNG xuất ra dòng suy nghĩ bằng tiếng Anh.
-2. **Kiểm soát Link tuyệt đối (Zero Hallucinated URLs):** CHỈ ĐƯỢC CUNG CẤP LINK nếu link đó có mặt 100% chính xác trong `{knowledge_context}`.
-3. **Định dạng Link chuẩn:** Đính kèm link chuẩn dạng `<URL>` hoặc `[Tên hiển thị](URL)`.
-4. **CẤM DÙNG BẢNG:** Tuyệt đối KHÔNG xuất bảng Markdown dưới mọi hình thức.
+1. **Ngôn ngữ chuẩn 100% Tiếng Việt.**
+2. **Kiểm soát Link tuyệt đối:** CHỈ ĐƯỢC CUNG CẤP LINK nếu link đó có mặt 100% chính xác trong `{knowledge_context}`.
+3. **CẤM DÙNG BẢNG:** Tuyệt đối KHÔNG xuất bảng Markdown.
 
 ---
 
@@ -259,7 +252,7 @@ Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên k
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI LLM DÙNG CHO GOOGLE CHAT
+# HÀM GỌI GEMINI 3.6 FLASH
 # ------------------------------------------------------------------------------
 async def call_gemini_api(system_prompt: str, user_msg: str) -> str:
     if not GEMINI_API_KEY:
@@ -273,7 +266,7 @@ async def call_gemini_api(system_prompt: str, user_msg: str) -> str:
     payload = {
         "systemInstruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2000}
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2000}
     }
     
     try:
@@ -297,7 +290,7 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_message}
             ],
-            "temperature": 0.2,
+            "temperature": 0.1,
             "max_tokens": 2000
         }
         try:
@@ -359,7 +352,7 @@ async def chat_stream(req: ChatRequest):
             payload = {
                 "model": CEREBRAS_MODEL,
                 "messages": messages_payload,
-                "temperature": 0.2,
+                "temperature": 0.1,
                 "max_tokens": 2000,
                 "stream": True
             }
@@ -391,7 +384,7 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
 # ------------------------------------------------------------------------------
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - GIỚI HẠN CỨNG 3.0 GIÂY CHỐNG TIMEOUT
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - CÂU CHÀO TỨC THÌ LẬP TỨC
 # ------------------------------------------------------------------------------
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -405,15 +398,14 @@ async def google_chat_webhook(request: Request):
             return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!"))
 
         quick_greetings = ["chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em"]
-        if not cleaned_message or any(g in cleaned_message.lower() for g in quick_greetings):
+        if not cleaned_message or any(g == cleaned_message.lower() for g in quick_greetings) or "chào" in cleaned_message.lower():
             return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"))
 
         focused_knowledge = get_high_precision_knowledge(cleaned_message, role="Sale")
         system_instruction = build_smart_system_prompt(focused_knowledge)
 
-        # Đặt trần timeout 3.0s bắt buộc để không bao giờ bị Google Chat ngắt kết nối
         try:
-            ai_response = await asyncio.wait_for(call_llm_single(system_instruction, cleaned_message), timeout=3.0)
+            ai_response = await asyncio.wait_for(call_llm_single(system_instruction, cleaned_message), timeout=2.8)
         except asyncio.TimeoutError:
             ai_response = "👋 Dạ em chào anh/chị! Em đã nhận thông tin. Anh/chị cần tra cứu cài đặt hay khắc phục lỗi cho model thiết bị nào ạ?"
 
