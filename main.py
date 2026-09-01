@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Fixed Workspace Engine", version="410.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Master Prompt Engine", version="430.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,7 +24,7 @@ app.add_middleware(
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "").strip()
-CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b").strip()
+CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "gpt-oss-120b").strip()
 AVAILABLE_CEREBRAS_MODELS = []
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
@@ -44,7 +44,7 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỜI TẠO HTTP CLIENT & KHÓA CHÍNH XÁC MODEL LLAMA CEREBRAS
+# KHỞI TẠO HTTP CLIENT & DÒ MODEL CEREBRAS
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
@@ -64,7 +64,6 @@ async def shutdown_event():
 async def discover_active_cerebras_models():
     global CEREBRAS_MODEL, AVAILABLE_CEREBRAS_MODELS
     if not CEREBRAS_API_KEY:
-        print("🚨 [STARTUP] Chưa có CEREBRAS_API_KEY!")
         return
 
     url = "https://api.cerebras.ai/v1/models"
@@ -75,20 +74,16 @@ async def discover_active_cerebras_models():
             models_data = res.json().get("data", [])
             model_ids = [m["id"] for m in models_data]
             AVAILABLE_CEREBRAS_MODELS = model_ids
-            print(f"📋 [CEREBRAS MODELS RETURNED]: {model_ids}")
-            
-            # Khóa ưu tiên tuyệt đối Llama 3.3 70B
-            for m_id in model_ids:
-                if "llama-3.3-70b" in m_id or "llama3.3-70b" in m_id or "llama-3.3" in m_id:
-                    CEREBRAS_MODEL = m_id
-                    print(f"✅ LOCKED CEREBRAS LLAMA MODEL: {CEREBRAS_MODEL}")
-                    return
-            
-            # Nếu không tìm thấy trong danh sách, vẫn giữ nguyên biến môi trường Llama
-            CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b").strip()
-    except Exception as e:
-        print(f"🚨 Lỗi check model Cerebras: {str(e)}")
-        CEREBRAS_MODEL = "llama-3.3-70b"
+            if "gpt-oss-120b" in model_ids:
+                CEREBRAS_MODEL = "gpt-oss-120b"
+            elif "gemma-4-31b" in model_ids:
+                CEREBRAS_MODEL = "gemma-4-31b"
+            elif model_ids:
+                CEREBRAS_MODEL = model_ids[0]
+        else:
+            CEREBRAS_MODEL = "gpt-oss-120b"
+    except Exception:
+        CEREBRAS_MODEL = "gpt-oss-120b"
 
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
@@ -116,7 +111,7 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "410.0",
+        "version": "430.0",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -202,68 +197,62 @@ def clean_thinking_process(text: str) -> str:
             return last_part[match.start():].strip()
     
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    # Lọc bỏ các dấu kẻ bảng hoặc tiêu đề ### thừa nếu AI cố tình xuất ra
+    text = re.sub(r'#{1,6}\s*', '', text)
+    text = re.sub(r'---+', '', text)
     return text.strip()
 
 # ------------------------------------------------------------------------------
-# PROMPT CHUẨN KHO SAPO
+# PROMPT CHUẨN MASTER DỰA TRÊN KHUNG YÊU CẦU CỦA ANH
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
 # VAI TRÒ & TƯ DUY NGHỆ CƠ BẢN (IDENTITY & EXPERT MINDSET)
-
 Bạn là **Trợ Lý KHO Sapo** – Chuyên gia IT cao cấp phụ trách kỹ thuật phần cứng (máy in đơn hàng, máy in tem, máy quét mã vạch, thiết bị POS...).
 - **Phong thái:** Thực chiến, nhạy bén, điềm tĩnh, chuyên nghiệp như một Kỹ thuật viên IT lâu năm.
 - **Xưng hô:** Xưng "Em", gọi người dùng là "Anh/chị".
-- **Tư duy cốt lõi (Root Cause Analysis):** Luôn phân tích sự cố theo chiều hướng: **Phần cứng (Điện, dây, giấy) ➡️ Phần mềm (Driver, Khổ giấy) ➡️ Kết nối (IP, LAN, Bluetooth)**. Hướng dẫn người dùng làm bước ĐƠN GIẢN TRƯỚC, BỚT PHỨC TẠP SAU.
-
----
-
-# MA TRẬN LIÊN KẾT CHÉO DỮ LIỆU (CROSS-DATA LINKAGE)
-
-Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên kết 4 chiều:
-1. **Model thiết bị:** (SPR02, SPL01, K200L, Xprinter...) 
-2. **Hệ điều hành / Thiết bị điều khiển:** (Windows, Mac, Android, iOS, Máy POS Sapo)
-3. **Cổng kết nối:** (USB, LAN, Bluetooth, Wi-Fi)
-4. **Mục đích sử dụng:** (In hóa đơn, in tem nhãn, in đơn hàng sàn TMĐT...)
+- **Tư duy cốt lõi (Root Cause Analysis):** Phân tích sự cố theo hướng: Phần cứng ➔ Phần mềm ➔ Kết nối. Hướng dẫn bước ĐƠN GIẢN TRƯỚC, BỚT PHỨC TẠP SAU.
 
 ---
 
 # QUY TRÌNH XỬ LÝ THEO KỊCH BẢN (ADAPTIVE WORKFLOWS)
 
-### KỊCH BẢN A: CÂU HỎI TỪ KHÓA CHUNG / CHỈ CÓ TÊN MÁY
-*(Ví dụ: "spr02", "k200l", "xprinter")*
+### KỊCH BẢN A: CÂU HỎI TỪ KHÓA CHUNG / CHỈ CÓ TÊN MÁY (Ví dụ: "spr02", "k200l", "xprinter")
 - **HÀNH ĐỘNG:** BỎ QUA các chi tiết link trong Kho dữ liệu, TUYỆT ĐỐI KHÔNG xả tài liệu dài dòng hay danh sách lỗi. Chỉ hỏi lại lịch sự để khoanh vùng nhu cầu:
   "Dạ thiết bị **[Tên thiết bị]**, anh/chị đang cần em hỗ trợ mục nào dưới đây ạ?
   1. 💻 **Cài đặt Driver trên Máy tính** (Windows / Mac)
   2. 📱 **Cài đặt in qua Điện thoại / Máy POS** (App XTEST / Kết nối LAN / Đổi IP)
   3. 🛠️ **Khắc phục sự cố** (Không cắt giấy, in ra giấy trắng, nghẽn mạng, báo đèn đỏ...)"
 
-### KỊCH BẢN B: XỬ LÝ SỰ CỐ / BÁO LỖI KỸ THUẬT / CẦN CÀI ĐẶT CỤ THỂ
-*(Ví dụ: "in ra giấy trắng", "cài spr02 qua điện thoại", "driver spr02")*
-- **HÀNH ĐỘNG:** Trả lời trực diện giải pháp cho thiết bị đang đề cập. Đưa ra quy trình từng bước rõ ràng và đính kèm ĐẦY ĐỦ link Driver/Tài liệu tương ứng từ Kho dữ liệu bên dưới.
-- các bước cài đặt theo chuẩn IT nhưng dựa theo cài đặt trên driver, chứ không hướng dẫn theo kiểu add máy in thủ công 
-
-### KỊCH BẢN C: THIẾU THÔNG TIN THIẾT BỊ (ĐIỀN KHUYẾT THÔNG MINH)
-*(Ví dụ: "cài máy in hóa đơn", "in tem bị chệch")*
+### KỊCH BẢN B: XỬ LÝ SỰ CỐ / BÁO LỖI KỸ THUẬT / CẦN CÀI ĐẶT CỤ THỂ (Ví dụ: "cài driver spr02", "in ra giấy trắng")
 - **HÀNH ĐỘNG:** 
-  - Nếu trong các tin nhắn trước người dùng ĐÃ NÓI tên thiết bị: Dùng ngay tên thiết bị đó để xử lý theo Kịch bản B, TUYỆT ĐỐI KHÔNG HỎI LAI.
-  - Nếu người dùng CHƯA NÓI tên thiết bị: Đưa ngay quy trình xử lý chuẩn IT chung (VD: hướng dẫn vào Control Panel > Devices and Printers) 💬 **ĐỒNG THỜI** kết bài bằng lời hỏi khéo: *"Anh/chị cho em xin tên model máy (VD: SPR02, SPL01...) để em gửi chính xác link Driver và video thao tác nhé ạ!"*
-  
+  1. Trả lời trực diện giải pháp dựa 100% VÀO NỘI DUNG TRONG KHO DỮ LIỆU.
+  2. Hướng dẫn cài đặt Driver: BẮT BỘ hướng dẫn chạy trực tiếp file cài đặt `.exe` (Windows) hoặc `.dmg` (macOS) rồi nhấn Next/Install. **TUYỆT ĐỐI CẤM** hướng dẫn add máy in thủ công bằng Windows Control Panel ("Add a local printer").
+  3. Đính kèm ĐẦY ĐỦ link Driver/Tài liệu/Video tương ứng từ Kho dữ liệu bên dưới.
+
+### KỊCH BẢN C: THIẾU THÔNG TIN THIẾT BỊ (ĐIỀN KHUYẾT THÔNG MINH) (Ví dụ: "cài máy in hóa đơn")
+- **HÀNH ĐỘNG:** 
+  - Nếu trong các tin nhắn trước người dùng ĐÃ NÓI tên thiết bị: Dùng ngay tên thiết bị đó để xử lý theo Kịch bản B, TUYỆT ĐỐI KHÔNG HỎI LẠI.
+  - Nếu người dùng CHƯA NÓI tên thiết bị: Đưa quy trình xử lý chuẩn IT chung và hỏi khéo: *"Anh/chị cho em xin tên model máy (VD: SPR02, SPL01...) để em gửi chính xác link Driver và video thao tác nhé ạ!"*
+
 ### KỊCH BẢN D: THIẾU DỮ LIỆU HOẶC MÁY NGOÀI DANH MỤC
 - **HÀNH ĐỘNG:** Đưa ra hướng xử lý IT căn bản và gợi ý liên hệ tổng đài Sapo.
 
 ---
 
-# LUẬT THÉP BẢO VỆ DỮ LIỆU & CHỐNG BỊA ĐẶT (STRICT GUARDRAILS)
+# LUẬT THÉP BẢO VỆ DỮ LIỆU & CHỐNG LỖI HIỂN THỊ (STRICT GUARDRAILS)
 
 1. **Ngôn ngữ chuẩn 100% Tiếng Việt:** TUYỆT ĐỐI KHÔNG xuất ra dòng suy nghĩ bằng tiếng Anh.
-2. **Kiểm soát Link tuyệt đối (Zero Hallucinated URLs):** CHỈ ĐƯỢC CUNG CẤP LINK nếu link đó có mặt 100% chính xác trong `{knowledge_context}`.
-3. **Định dạng Link chuẩn:** Đính kèm link chuẩn dạng `<URL>` hoặc `[Tên hiển thị](URL)`.
-4. **CẤM DÙNG BẢNG:** Tuyệt đối KHÔNG xuất bảng Markdown dưới mọi hình thức.
+2. **Kiểm soát Link tuyệt đối (Zero Hallucinated URLs):** CHỈ CUNG CẤP LINK nếu link đó có mặt 100% chính xác trong KHO DỮ LIỆU.
+3. **CẤM DÙNG BẢNG VÀ TIÊU ĐỀ KẺ NGANG (Tránh văng lỗi Google Chat):**
+   - **CẤM HOÀN TOÀN** dùng bảng Markdown (`| ... |`). Hãy liệt kê link dạng gạch đầu dòng:
+     - 🔹 **Driver Windows:** `<Link>`
+     - 🔹 **Driver macOS:** `<Link>`
+   - **CẤM HOÀN TOÀN** dùng dấu băm tiêu đề (`#`, `##`, `###`) và thanh kẻ ngang (`---`). Hãy dùng chữ in đậm và Emoji để phân đoạn.
 
 ---
 
-# KHO DỮ LIỆU GỐC SAPO
+KHO DỮ LIỆU GỐC SAPO:
 {knowledge_context}
 """
 
@@ -279,7 +268,7 @@ async def call_gemini_with_retry(system_instruction: str, user_message: str) -> 
     payload = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": [{"role": "user", "parts": [{"text": user_message}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2000}
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2000}
     }
 
     try:
@@ -302,7 +291,7 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_message}
             ],
-            "temperature": 0.2,
+            "temperature": 0.1,
             "max_tokens": 2000
         }
         try:
@@ -314,17 +303,17 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
 
     return await call_gemini_with_retry(system_instruction, user_message)
 
-# ------------------------------------------------------------------------------
-# KHÔI PHỤC HÀM WRAPPER KHUÔN ĐÓNG GOOGLE WORKSPACE ADD-ON TỪ BẢN V180.0
-# ------------------------------------------------------------------------------
 def wrap_gsuite_addon_response(text_message: str) -> dict:
+    # Làm sạch triệt để Markdown rác cho Google Chat
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', text_message)
+    clean_text = re.sub(r'#{1,6}\s*', '', clean_text)
+    clean_text = re.sub(r'---+', '', clean_text)
     return {
         "hostAppDataAction": {
             "chatDataAction": {
                 "createMessageAction": {
                     "message": {
-                        "text": clean_text
+                        "text": clean_text.strip()
                     }
                 }
             }
@@ -332,7 +321,7 @@ def wrap_gsuite_addon_response(text_message: str) -> dict:
     }
 
 # ------------------------------------------------------------------------------
-# 1. CỔNG WEB CHAT (/chat) - NỐI LỊCH SỬ CHAT TRÁNH MẤT TÊN MÁY (TỪ V180.0)
+# 1. CỔNG WEB CHAT (/chat)
 # ------------------------------------------------------------------------------
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -345,7 +334,6 @@ async def chat_stream(req: ChatRequest):
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
-    # Nối 3 câu nói gần nhất để không bị mất tên máy (SPR02) ở câu tiếp theo
     user_msgs = [m["text"] for m in req.messages if m.get("role") in ["user", "Khach_Hang"]]
     combined_query = " ".join(user_msgs[-3:]) if user_msgs else latest_msg
 
@@ -367,7 +355,7 @@ async def chat_stream(req: ChatRequest):
             payload = {
                 "model": CEREBRAS_MODEL,
                 "messages": messages_payload,
-                "temperature": 0.2,
+                "temperature": 0.1,
                 "max_tokens": 2000,
                 "stream": True
             }
