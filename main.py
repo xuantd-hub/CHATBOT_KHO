@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo True Debug Engine", version="400.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Fixed Workspace Engine", version="410.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -44,7 +44,7 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO HTTP CLIENT & DÒ TÌM MODEL CEREBRAS
+# KHỜI TẠO HTTP CLIENT & KHÓA CHÍNH XÁC MODEL LLAMA CEREBRAS
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
@@ -64,32 +64,31 @@ async def shutdown_event():
 async def discover_active_cerebras_models():
     global CEREBRAS_MODEL, AVAILABLE_CEREBRAS_MODELS
     if not CEREBRAS_API_KEY:
-        print("🚨 [STARTUP] CRITICAL: CEREBRAS_API_KEY bị trống!")
+        print("🚨 [STARTUP] Chưa có CEREBRAS_API_KEY!")
         return
 
     url = "https://api.cerebras.ai/v1/models"
     headers = {"Authorization": f"Bearer {CEREBRAS_API_KEY}"}
     try:
         res = await HTTP_CLIENT.get(url, headers=headers, timeout=6.0)
-        print(f"🔍 [STARTUP] CEREBRAS CHECK MODEL HTTP STATUS: {res.status_code}")
         if res.status_code == 200:
             models_data = res.json().get("data", [])
             model_ids = [m["id"] for m in models_data]
             AVAILABLE_CEREBRAS_MODELS = model_ids
-            print(f"📋 [STARTUP] DANH SÁCH MODEL CEREBRAS TRẢ VỀ: {model_ids}")
+            print(f"📋 [CEREBRAS MODELS RETURNED]: {model_ids}")
             
-            env_model = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b").strip()
-            if env_model in model_ids:
-                CEREBRAS_MODEL = env_model
-            elif "llama-3.3-70b" in model_ids:
-                CEREBRAS_MODEL = "llama-3.3-70b"
-            elif model_ids:
-                CEREBRAS_MODEL = model_ids[0]
-            print(f"✅ [STARTUP] ĐÃ KHÓA MODEL CEREBRAS: {CEREBRAS_MODEL}")
-        else:
-            print(f"🚨 [STARTUP] LỖI CEREBRAS API MODELS ({res.status_code}): {res.text}")
+            # Khóa ưu tiên tuyệt đối Llama 3.3 70B
+            for m_id in model_ids:
+                if "llama-3.3-70b" in m_id or "llama3.3-70b" in m_id or "llama-3.3" in m_id:
+                    CEREBRAS_MODEL = m_id
+                    print(f"✅ LOCKED CEREBRAS LLAMA MODEL: {CEREBRAS_MODEL}")
+                    return
+            
+            # Nếu không tìm thấy trong danh sách, vẫn giữ nguyên biến môi trường Llama
+            CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "llama-3.3-70b").strip()
     except Exception as e:
-        print(f"🚨 [STARTUP] EXCEPTION CHECK CEREBRAS MODEL: {str(e)}")
+        print(f"🚨 Lỗi check model Cerebras: {str(e)}")
+        CEREBRAS_MODEL = "llama-3.3-70b"
 
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
@@ -103,8 +102,7 @@ async def fetch_single_tab_raw(tab: str):
                 if row_data:
                     records.append(row_data)
             return tab, records
-    except Exception as e:
-        print(f"🚨 [SHEET ERROR] TAB {tab}: {str(e)}")
+    except Exception: pass
     return tab, []
 
 async def load_sheet_data_async():
@@ -112,14 +110,13 @@ async def load_sheet_data_async():
     tasks = [fetch_single_tab_raw(tab) for tab in ALL_TABS]
     results = await asyncio.gather(*tasks)
     RAM_CACHE = {tab: records for tab, records in results}
-    print("✅ [SHEET] Dữ liệu Google Sheet đã nạp xong RAM Cache")
     return {"status": "success"}
 
 @app.get("/")
 def health_check():
     return {
         "status": "healthy", 
-        "version": "400.0",
+        "version": "410.0",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -212,41 +209,26 @@ def clean_thinking_process(text: str) -> str:
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
-Bạn là **Trợ Lý KHO Sapo** – Chuyên gia IT cao cấp phụ trách kỹ thuật phần cứng Sapo cực kỳ THÔNG MINH, TINH TẾ và CHÍNH XÁC CÔNG NGHỆ.
+Bạn là **Trợ Lý KHO Sapo** – Chuyên gia IT cao cấp hỗ trợ kỹ thuật thiết bị Sapo cực kỳ THÔNG MINH, TINH TẾ và LỊCH SỰ.
 
-🚨 LUẬT KHÓA PHÂN LOẠI THIẾT BỊ (CHỐNG LẪN LỘN CỰC KỲ QUAN TRỌNG):
-1. **NHẬN DIỆN ĐÚNG LOẠI THIẾT BỊ ĐANG HỎI:**
-   - **MÁY IN TEM NHÃN / MÃ VẠCH (Ví dụ: G8, SPL01, XP-350B, XP-420B, SP460BT...):**
-     ➔ Đây là dòng máy chuyên dùng để IN TEM/MÃ VẠCH.
-     ➔ **TUYỆT ĐỐI CẤM** gọi dòng máy này là "máy in hóa đơn" hoặc phát ngôn "Máy in hóa đơn này không in được giấy tem"!
-   - **MÁY IN HÓA ĐƠN (Ví dụ: SPR01, SPR02, K200L, K200U...):**
-     ➔ Đây là dòng máy chuyên dùng để IN HÓA ĐƠN KHỔ K80/K57.
+🎯 QUY TẮC PHẢN HỒI THÔNG MINH:
 
-2. **CẮT BỎ LỊCH SỬ MÁY CŨ (CONTEXT ISOLATION):**
-   - Khi người dùng đổi sang hỏi tên máy mới (Ví dụ: vừa hỏi SPR02 xong chuyển sang hỏi G8), bạn PHẢI TẬP TRUNG 100% VÀO MÁY MỚI (G8).
-   - KHÔNG ĐƯỢC mang cảnh báo hay đặc tính của máy cũ (SPR02) gán cho máy mới (G8).
+1. **NẾU CÂU HỎI CHỈ LÀ TÊN THIẾT BỊ (Ví dụ: "spr02", "g8", "k200l"):**
+   - Hỏi lại người dùng một cách lịch sự để khoanh vùng nhu cầu:
+     "Dạ thiết bị **[Tên thiết bị]**, anh/chị đang cần em hỗ trợ mục nào dưới đây ạ?
+     1. 💻 **Cài đặt Driver trên Máy tính** (Windows / Mac)
+     2. 📱 **Cài đặt in qua Điện thoại** (App XTEST / Kết nối LAN / Đổi IP)
+     3. 🛠️ **Khắc phục sự cố** (Không cắt giấy, in ra giấy trắng, nghẽn mạng...)"
 
-3. **BẮT BỘ KIỂM TRA PHẦN CỨNG (HARDWARE GATEKEEPER):**
-   - Nếu thiết bị trong kho dữ liệu ghi chỉ có cổng **USB / Máy tính** (Ví dụ: G8, K200U...):
-     ➔ **TUYỆT ĐỐI KHÔNG DÙNG MENU "Cài đặt qua điện thoại"**.
-     ➔ Nếu người dùng hỏi hoặc chọn "cài qua điện thoại/máy POS", từ chối ngay: *"Dạ thiết bị **[Tên máy]** là dòng máy in kết nối qua cổng USB với Máy tính, KHÔNG hỗ trợ kết nối in qua Điện thoại hay App mobile ạ."*
-
----
-
-🎯 QUY TẮC PHẢN HỒI THÔNG MINH THEO KỊCH BẢN:
-
-1. **CÂU HỎI CHỈ CÓ TÊN MÁY:**
-   - Nếu máy CÓ hỗ trợ Điện thoại/LAN: Đưa ra 3 lựa chọn (1. Máy tính, 2. Điện thoại/Máy POS, 3. Sự cố).
-   - Nếu máy CHỈ hỗ trợ USB (như G8): Chỉ đưa ra 2 lựa chọn (1. Máy tính, 2. Sự cố).
-
-2. **CÂU HỎI RÕ Ý ĐỊNH:**
-   - Trả lời thẳng vào giải pháp, trình bày ngắn gọn, gạch đầu dòng rõ ràng.
-   - Đính kèm đầy đủ link tài liệu/driver/video từ KHO DỮ LIỆU.
+2. **NẾU CÂU HỎI CÓ Ý ĐỊNH RÕ RÀNG (Ví dụ: "cài spr02 trên điện thoại", "cài đặt in qua xtest nhé"):**
+   - Trả lời đầy đủ, chi tiết từng bước hướng dẫn, gạch đầu dòng rõ ràng.
+   - Trích xuất toàn bộ Link bài viết hướng dẫn, link video YouTube, link Driver tương ứng từ KHO DỮ LIỆU BÊN DƯỚI.
+   - Thêm cảnh báo lưu ý quan trọng (nếu có trong dữ liệu).
 
 3. **LUẬT THÉP CHỐNG BỊA ĐẶT:**
    - TRẢ LỜI 100% BẰNG TIẾNG VIỆT.
-   - Chỉ được phép cung cấp Link Driver / Tài liệu nếu Link đó CÓ TRONG mục KHO DỮ LIỆU bên dưới.
-   - Dùng xưng hô "Em" - gọi "Anh/chị". Tuyệt đối không vẽ bảng.
+   - Chỉ được cung cấp Link Driver / Tài liệu nếu Link đó CÓ TRONG mục KHO DỮ LIỆU bên dưới.
+   - Dùng xưng hô "Em", gọi "Anh/chị". Tuyệt đối không vẽ bảng.
 
 ---
 
@@ -255,35 +237,29 @@ KHO DỮ LIỆU GỐC CỦA SAPO (Chỉ lấy thông số & Link từ đây):
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI GEMINI 3.6 FLASH DỰ PHÒNG CÓ LOG NGUYÊN VĂN
+# HÀM GỌI GEMINI DỰ PHÒNG
 # ------------------------------------------------------------------------------
 async def call_gemini_with_retry(system_instruction: str, user_message: str) -> str:
     if not GEMINI_API_KEY:
-        print("🚨 [GEMINI CALL] CRITICAL ERROR: Biến GEMINI_API_KEY bị trống!")
-        return "👋 Dạ em chào anh/chị! Em là **Trợ Lý KHO Sapo**. Anh/chị cần em hỗ trợ cài đặt hay tra cứu thông tin cho thiết bị nào ạ?"
+        return "👋 Dạ em chào anh/chị! Em là **Trợ Lý KHO Sapo**. Anh/chị cần em hỗ trợ cài đặt hay tra cứu thiết bị nào ạ?"
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     payload = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": [{"role": "user", "parts": [{"text": user_message}]}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2000}
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2000}
     }
 
     try:
         res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
-        print(f"📡 [GEMINI CALL] HTTP STATUS: {res.status_code}")
         if res.status_code == 200:
             data = res.json()
             raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
-            cleaned = clean_thinking_process(raw_text)
-            if cleaned: return cleaned
-        else:
-            print(f"🚨 [GEMINI CALL ERROR] Status {res.status_code} | Payload: {res.text}")
-    except Exception as e:
-        print(f"🚨 [GEMINI CALL EXCEPTION]: {str(e)}")
+            return clean_thinking_process(raw_text)
+    except Exception: pass
 
-    return "👋 Dạ em chào anh/chị! Em là **Trợ Lý KHO Sapo**. Anh/chị cần em hỗ trợ cài đặt hay tra cứu thông tin cho thiết bị nào ạ?"
+    return "👋 Dạ em chào anh/chị! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ cài đặt hay tra cứu thiết bị nào ạ?"
 
 async def call_llm_single(system_instruction: str, user_message: str) -> str:
     if CEREBRAS_API_KEY and CEREBRAS_MODEL:
@@ -295,28 +271,37 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_message}
             ],
-            "temperature": 0.1,
+            "temperature": 0.2,
             "max_tokens": 2000
         }
         try:
             res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=3.5)
-            print(f"📡 [CEREBRAS CALL] HTTP STATUS: {res.status_code}")
             if res.status_code == 200:
                 data = res.json()
                 return clean_thinking_process(data["choices"][0]["message"]["content"])
-            else:
-                print(f"🚨 [CEREBRAS CALL ERROR] Status {res.status_code} | Response: {res.text}")
-        except Exception as e:
-            print(f"🚨 [CEREBRAS CALL EXCEPTION]: {str(e)}")
+        except Exception: pass
 
     return await call_gemini_with_retry(system_instruction, user_message)
 
+# ------------------------------------------------------------------------------
+# KHÔI PHỤC HÀM WRAPPER KHUÔN ĐÓNG GOOGLE WORKSPACE ADD-ON TỪ BẢN V180.0
+# ------------------------------------------------------------------------------
 def wrap_gsuite_addon_response(text_message: str) -> dict:
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', text_message)
-    return {"text": clean_text}
+    return {
+        "hostAppDataAction": {
+            "chatDataAction": {
+                "createMessageAction": {
+                    "message": {
+                        "text": clean_text
+                    }
+                }
+            }
+        }
+    }
 
 # ------------------------------------------------------------------------------
-# 1. CỔNG WEB CHAT (/chat)
+# 1. CỔNG WEB CHAT (/chat) - NỐI LỊCH SỬ CHAT TRÁNH MẤT TÊN MÁY (TỪ V180.0)
 # ------------------------------------------------------------------------------
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -329,8 +314,9 @@ async def chat_stream(req: ChatRequest):
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
+    # Nối 3 câu nói gần nhất để không bị mất tên máy (SPR02) ở câu tiếp theo
     user_msgs = [m["text"] for m in req.messages if m.get("role") in ["user", "Khach_Hang"]]
-    combined_query = user_msgs[-1] if user_msgs else latest_msg
+    combined_query = " ".join(user_msgs[-3:]) if user_msgs else latest_msg
 
     focused_knowledge = get_high_precision_knowledge(combined_query, req.role)
     system_instruction = build_smart_system_prompt(focused_knowledge)
@@ -340,7 +326,7 @@ async def chat_stream(req: ChatRequest):
         
         if CEREBRAS_API_KEY and CEREBRAS_MODEL:
             messages_payload = [{"role": "system", "content": system_instruction}]
-            trimmed = req.messages[-3:] if len(req.messages) > 3 else req.messages
+            trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
             for m in trimmed:
                 role_type = "user" if m["role"] == "user" else "assistant"
                 messages_payload.append({"role": role_type, "content": m["text"]})
@@ -350,14 +336,13 @@ async def chat_stream(req: ChatRequest):
             payload = {
                 "model": CEREBRAS_MODEL,
                 "messages": messages_payload,
-                "temperature": 0.1,
+                "temperature": 0.2,
                 "max_tokens": 2000,
                 "stream": True
             }
             try:
                 cerebras_timeout = httpx.Timeout(10.0, connect=2.5)
                 async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload, timeout=cerebras_timeout) as response:
-                    print(f"📡 [CEREBRAS STREAM] HTTP STATUS: {response.status_code}")
                     if response.status_code == 200:
                         async for line in response.aiter_lines():
                             if line and line.startswith("data: "):
@@ -374,13 +359,9 @@ async def chat_stream(req: ChatRequest):
                                 except Exception: pass
                         if has_yielded:
                             return
-                    else:
-                        print(f"🚨 [CEREBRAS STREAM ERROR] Status Code: {response.status_code}")
-            except Exception as e:
-                print(f"🚨 [CEREBRAS STREAM EXCEPTION]: {str(e)}")
+            except Exception: pass
 
         if not has_yielded:
-            print("🔄 [FALLBACK] Cerebras không nhả token -> Kích hoạt Gemini Backup...")
             fallback_ans = await call_gemini_with_retry(system_instruction, combined_query)
             yield fallback_ans
 
@@ -407,14 +388,8 @@ async def google_chat_webhook(request: Request):
         focused_knowledge = get_high_precision_knowledge(cleaned_message, role="Sale")
         system_instruction = build_smart_system_prompt(focused_knowledge)
 
-        try:
-            ai_response = await asyncio.wait_for(call_llm_single(system_instruction, cleaned_message), timeout=2.8)
-        except asyncio.TimeoutError:
-            print("🚨 [GOOGLE CHAT TIMEOUT] Quá 2.8s -> Trả câu chào dự phòng để giữ kết nối")
-            ai_response = "👋 Dạ em chào anh/chị! Em đã nhận thông tin. Anh/chị cần tra cứu cài đặt hay khắc phục lỗi cho model thiết bị nào ạ?"
-
+        ai_response = await call_llm_single(system_instruction, cleaned_message)
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
-    except Exception as e:
-        print(f"🚨 [GOOGLE CHAT WEBHOOK ERROR]: {str(e)}")
+    except Exception:
         return JSONResponse(content=wrap_gsuite_addon_response("👋 Dạ em chào anh/chị! Em là Trợ Lý KHO Sapo. Anh/chị cần em hỗ trợ cài đặt hay tra cứu lỗi thiết bị nào ạ?"))
