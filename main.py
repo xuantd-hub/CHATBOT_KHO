@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Rock-Solid Flow Engine", version="2200.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Perfectly Tuned Engine", version="2300.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,8 +100,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "2200.0", 
-        "engine": "Rock-Solid Flow Engine",
+        "version": "2300.0", 
+        "engine": "Perfectly Tuned Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -213,9 +213,6 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     
     user_texts = [m.get("text", "") for m in messages_list if m.get("role") in ["user", "Khach_Hang"]]
     combined_user_text = " ".join(user_texts).lower()
-    
-    latest_msg = messages_list[-1]["text"] if messages_list else ""
-    latest_lower = latest_msg.lower()
 
     detected_model, detected_category = extract_device_info_from_history(messages_list)
     platform_intent = extract_platform_intent(messages_list)
@@ -307,11 +304,12 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
    - Khi Dữ liệu có bài hướng dẫn cài trên **Windows**, AI xuất bài Windows và link `Link_Driver_Win`.
 
    👉 💡 QUY TẮC MỞ ĐẦU LỊCH SỰ KHI GỬI BÀI WINDOWS MẶC ĐỊNH:
-      - Khi người dùng chỉ nói chung chung "mới đổi máy tính" hoặc "máy tính" (mà CHƯA NÓI RÕ là Windows hay Mac), khi gửi bài Windows, AI BẮT BUỘC chèn 1 câu dẫn dắt tự nhiên:
+      - Khi người dùng chỉ nói chung chung "mới đổi máy tính" hoặc "máy tính" (mà CHƯA NÓI RÕ là Windows hay Mac), khi gửi bài Windows, AI BẮT BUỘC chèn 1 câu dẫn dắt tự nhiên ở đầu:
         "Dạ, em xin gửi anh/chị hướng dẫn cài đặt trên máy tính **Windows** ạ. (Nếu mình đang sử dụng máy **Mac / macOS**, anh/chị cứ nhắn em gửi bài hướng dẫn riêng cho Mac nhé! 😊)"
 
-👉 🛑 QUY TẮC ĐÍNH KÈM LINK VÀ NỘI DUNG SHEET:
-   - Xuất đầy đủ các cột link nếu có trong dòng dữ liệu:
+👉 🛑 QUY TẮC ĐÍNH KÈM LINK VÀ NỘI DUNG SHEET (TUÂN THỦ BẮT BUỘC):
+   - BẮT BUỘC Copy chính xác 100% từng ký tự URL từ Kho dữ liệu, CẤM CẮT NGẮN, CẤM VIẾT TẮT (`...`) HOẶC TỰ BỊA LINK KHÔNG CÓ TRONG SHEET.
+   - Xuất đầy đủ tất cả các link nếu có trong dòng dữ liệu (TUYỆT ĐỐI KHÔNG BỎ BỚT LINK VIDEO HOẶC LINK TÀI LIỆU):
      - 📄 **Tài liệu / Bài viết hướng dẫn:** <Link trong Sheet>
      - 💻 **Link Tải Driver Windows:** <Link_Driver_Win trong Sheet>
      - 🍏 **Link Tải Driver Mac:** <Link_Driver_Mac trong Sheet>
@@ -333,7 +331,7 @@ KHO DỮ LIỆU GỐC SAPO:
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI LLM CÓ BẢO VỆ CHỐNG TRẢ VỀ CÂU CHÀO KHI LỖI
+# HÀM GỌI LLM CÓ TEMPERATURE = 0.1 ÉP COPY NGUYÊN VĂN LINK
 # ------------------------------------------------------------------------------
 async def call_llm_with_history(system_instruction: str, messages_list: list) -> str:
     messages_payload = [{"role": "system", "content": system_instruction}]
@@ -348,7 +346,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         payload = {
             "model": CEREBRAS_MODEL,
             "messages": messages_payload,
-            "temperature": 0.3,
+            "temperature": 0.1,  # 🎯 Giữ văn phong nguyên bản nhưng dán link chính xác 100%
             "top_p": 0.9,
             "max_tokens": 2000
         }
@@ -374,7 +372,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         payload = {
             "systemInstruction": {"parts": [{"text": system_instruction}]},
             "contents": gemini_contents,
-            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2000}
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2000}  # 🎯 Temperature = 0.1
         }
         try:
             res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
