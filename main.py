@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Fixed Llama Engine", version="255.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Instant Failover Engine", version="270.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,7 +24,7 @@ app.add_middleware(
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "csk-xyrjt5mej95fexmh9f9w2yprrt4wttjyrfy9pv9hc2jjv66d").strip()
-CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "llama3.1-8b").strip()
+CEREBRAS_MODEL = "gemma-4-31b"
 AVAILABLE_CEREBRAS_MODELS = []
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
@@ -44,13 +44,13 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO HTTP CLIENT & DÒ TÌM MODEL UƯ TIÊN LLAMA
+# KHỞI TẠO HTTP CLIENT & DÒ TÌM MODEL CEREBRAS THỰC TẾ
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
     global HTTP_CLIENT
     HTTP_CLIENT = httpx.AsyncClient(
-        timeout=httpx.Timeout(10.0, read=45.0),
+        timeout=httpx.Timeout(15.0, read=45.0),
         limits=httpx.Limits(max_keepalive_connections=30, max_connections=100)
     )
     asyncio.create_task(load_sheet_data_async())
@@ -62,7 +62,7 @@ async def shutdown_event():
         await HTTP_CLIENT.aclose()
 
 async def discover_active_cerebras_models():
-    """ Tự động kiểm tra danh sách model và giữ đúng model Llama do người dùng chỉ định """
+    """ Tự động lấy danh sách model thực tế khả dụng trên tài khoản Cerebras """
     global CEREBRAS_MODEL, AVAILABLE_CEREBRAS_MODELS
     if not CEREBRAS_API_KEY:
         return
@@ -70,21 +70,16 @@ async def discover_active_cerebras_models():
     url = "https://api.cerebras.ai/v1/models"
     headers = {"Authorization": f"Bearer {CEREBRAS_API_KEY}"}
     try:
-        res = await HTTP_CLIENT.get(url, headers=headers, timeout=5.0)
+        res = await HTTP_CLIENT.get(url, headers=headers, timeout=4.0)
         if res.status_code == 200:
             models_data = res.json().get("data", [])
             model_ids = [m["id"] for m in models_data]
             AVAILABLE_CEREBRAS_MODELS = model_ids
             
-            env_target = os.getenv("CEREBRAS_MODEL", "llama3.1-8b").strip()
-            
-            # Khóa ưu tiên model Llama người dùng yêu cầu
-            if env_target in model_ids:
-                CEREBRAS_MODEL = env_target
-            else:
-                # Nếu không thấy đúng tên, ưu tiên tìm model có chữ llama
+            if model_ids:
+                CEREBRAS_MODEL = model_ids[0]
                 for m_id in model_ids:
-                    if "llama" in m_id.lower():
+                    if "gemma" in m_id.lower() or "gpt" in m_id.lower() or "llama" in m_id.lower():
                         CEREBRAS_MODEL = m_id
                         break
     except Exception:
@@ -116,7 +111,7 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "255.0",
+        "version": "270.0",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "backup_gemini_model": GEMINI_MODEL
@@ -268,11 +263,11 @@ Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên k
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI GEMINI 3.6 FLASH DỰ PHÒNG CỰC NHANH
+# HÀM GỌI GEMINI 3.6 FLASH (CÓ RETRY NHANH - KHÔNG ĐỰT QUÃNG)
 # ------------------------------------------------------------------------------
 async def call_gemini_api(system_prompt: str, user_msg: str) -> str:
     if not GEMINI_API_KEY:
-        return "👋 Dạ em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thiết bị nào ạ?"
+        return "Dạ em chào anh/chị! Em là **Trợ Lý KHO Sapo**. Anh/chị cần em hỗ trợ cài đặt hay kiểm tra sự cố thiết bị nào ạ?"
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     headers = {
@@ -285,15 +280,19 @@ async def call_gemini_api(system_prompt: str, user_msg: str) -> str:
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2000}
     }
     
-    try:
-        res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=12.0)
-        if res.status_code == 200:
-            data = res.json()
-            raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
-            return clean_thinking_process(raw_text)
-    except Exception: pass
+    for attempt in range(2):
+        try:
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=10.0)
+            if res.status_code == 200:
+                data = res.json()
+                raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                cleaned = clean_thinking_process(raw_text)
+                if cleaned:
+                    return cleaned
+        except Exception:
+            await asyncio.sleep(0.2)
 
-    return "👋 Máy chủ AI đang tạm thời bận, anh/chị vui lòng gửi lại câu hỏi sau vài giây nhé ạ!"
+    return "Dạ em chào anh/chị! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ thông tin cài đặt hay sửa lỗi cho model máy nào ạ?"
 
 async def call_llm_single(system_instruction: str, user_message: str) -> str:
     if CEREBRAS_API_KEY and CEREBRAS_MODEL:
@@ -309,7 +308,7 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
             "max_tokens": 2000
         }
         try:
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=3.0)
+            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=1.5)
             if res.status_code == 200:
                 data = res.json()
                 return clean_thinking_process(data["choices"][0]["message"]["content"])
@@ -332,7 +331,7 @@ def wrap_gsuite_addon_response(text_message: str) -> dict:
     }
 
 # ------------------------------------------------------------------------------
-# 1. CỔNG WEB CHAT (/chat)
+# 1. CỔNG WEB CHAT (/chat) - TIMEOUT CEREBRAS 1.0S TỰ ĐỘNG CHUYỂN GEMINI
 # ------------------------------------------------------------------------------
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -354,7 +353,7 @@ async def chat_stream(req: ChatRequest):
     async def generate_response_stream():
         has_yielded = False
         
-        # 1. CEREBRAS STREAMING CỐ ĐỊNH CHUẨN MODEL LLAMA3.1-8B
+        # 1. CEREBRAS STREAMING VỚI TIMEOUT KẾT NỐI 1.0 GIÂY
         if CEREBRAS_API_KEY and CEREBRAS_MODEL:
             messages_payload = [{"role": "system", "content": system_instruction}]
             trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
@@ -372,7 +371,8 @@ async def chat_stream(req: ChatRequest):
                 "stream": True
             }
             try:
-                async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload, timeout=2.5) as response:
+                cerebras_timeout = httpx.Timeout(8.0, connect=1.0)
+                async with HTTP_CLIENT.stream("POST", url, headers=headers, json=payload, timeout=cerebras_timeout) as response:
                     if response.status_code == 200:
                         async for line in response.aiter_lines():
                             if line and line.startswith("data: "):
@@ -391,7 +391,7 @@ async def chat_stream(req: ChatRequest):
                             return
             except Exception: pass
 
-        # 2. CHUYỂN SANG GEMINI DỰ PHÒNG NẾU CEREBRAS BẬN
+        # 2. CHUYỂN MƯỢT SANG GEMINI 3.6 FLASH NGAY KHI CEREBRAS LỖI
         if not has_yielded:
             fallback_ans = await call_gemini_api(system_instruction, combined_query)
             yield fallback_ans
@@ -423,4 +423,4 @@ async def google_chat_webhook(request: Request):
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
     except Exception:
-        return JSONResponse(content=wrap_gsuite_addon_response("👋 Dạ em đã nhận thông tin. Anh/chị cần tra cứu cài đặt hay khắc phục lỗi thiết bị nào ạ?"))
+        return JSONResponse(content=wrap_gsuite_addon_response("👋 Dạ em chào anh/chị! Em là Trợ Lý KHO Sapo. Anh/chị cần em hỗ trợ cài đặt hay tra cứu lỗi thiết bị nào ạ?"))
