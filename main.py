@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Perfect Engine", version="185.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Master Engine", version="200.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH BIẾN MÔI TRƯỜNG
+# CẤU HÌNH BIẾN MÔI TRƯỜNG & MODEL GEMINI-3.6-FLASH CHUẨN
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
@@ -42,13 +42,13 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO HTTP CLIENT (TIMEOUT TỐI ƯU FAILOVER 6S)
+# KHỞI TẠO HTTP CLIENT
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
     global HTTP_CLIENT
     HTTP_CLIENT = httpx.AsyncClient(
-        timeout=httpx.Timeout(6.0, read=30.0), # Rút ngắn connect timeout xuống 6s để chuyển Gemini tức thì nếu Groq kẹt
+        timeout=httpx.Timeout(10.0, read=30.0),
         limits=httpx.Limits(max_keepalive_connections=30, max_connections=100)
     )
     asyncio.create_task(load_sheet_data_async())
@@ -112,7 +112,7 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "185.0",
+        "version": "200.0",
         "active_groq_model": ACTIVE_GROQ_MODEL,
         "backup_gemini_model": GEMINI_MODEL
     }
@@ -126,7 +126,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# HÀM TRÍCH XUẤT VÀ LÀM SẠCH SUY NGHĨ TIẾNG ANH
+# HÀM BÓC TÁCH VÀ TRÍCH XUẤT NỘI DUNG
 # ------------------------------------------------------------------------------
 def extract_user_text(event: dict) -> str:
     if isinstance(event.get("message"), dict):
@@ -188,7 +188,6 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
     return knowledge_text
 
 def clean_thinking_process(text: str) -> str:
-    """ Loại bỏ triệt để đoạn suy nghĩ Tiếng Anh (Thinking Process / <think>) """
     if "Here's a thinking process:" in text:
         parts = text.split("Here's a thinking process:")
         last_part = parts[-1]
@@ -200,7 +199,7 @@ def clean_thinking_process(text: str) -> str:
     return text.strip()
 
 # ------------------------------------------------------------------------------
-# PROMPT CHUẨN HÓA ĐẦY ĐỦ 100% QUY TẮC
+# PROMPT HOÀN CHỈNH TẤT CẢ QUY TẮC & KỊCH BẢN
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
@@ -239,7 +238,8 @@ Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên k
 
 ### KỊCH BẢN C: THIẾU THÔNG TIN THIẾT BỊ (ĐIỀN KHUYẾT THÔNG MINH)
 *(Ví dụ: "cài máy in hóa đơn", "in tem bị chệch")*
-- **HÀNH ĐỘNG:** - Nếu trong các tin nhắn trước người dùng ĐÃ NÓI tên thiết bị: Dùng ngay tên thiết bị đó để xử lý theo Kịch bản B, TUYỆT ĐỐI KHÔNG HỎI LAI.
+- **HÀNH ĐỘNG:** 
+  - Nếu trong các tin nhắn trước người dùng ĐÃ NÓI tên thiết bị: Dùng ngay tên thiết bị đó để xử lý theo Kịch bản B, TUYỆT ĐỐI KHÔNG HỎI LAI.
   - Nếu người dùng CHƯA NÓI tên thiết bị: Đưa ngay quy trình xử lý chuẩn IT chung (VD: hướng dẫn vào Control Panel > Devices and Printers) 💬 **ĐỒNG THỜI** kết bài bằng lời hỏi khéo: *"Anh/chị cho em xin tên model máy (VD: SPR02, SPL01...) để em gửi chính xác link Driver và video thao tác nhé ạ!"*
 
 ### KỊCH BẢN D: THIẾU DỮ LIỆU HOẶC MÁY NGOÀI DANH MỤC
@@ -249,18 +249,10 @@ Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên k
 
 # LUẬT THÉP BẢO VỆ DỮ LIỆU & CHỐNG BỊA ĐẶT (STRICT GUARDRAILS)
 
-1. **Ngôn ngữ chuẩn 100% Tiếng Việt:** TUYỆT ĐỐI KHÔNG xuất ra dòng suy nghĩ bằng tiếng Anh (như "Analyzing prompt...", "Thought process...", "Here's a thinking process").
-2. **Kiểm soát Link tuyệt đối (Zero Hallucinated URLs):** - CHỈ ĐƯỢC CUNG CẤP LINK nếu link đó có mặt 100% chính xác trong `{knowledge_context}`.
-   - Nếu KHÔNG CÓ LINK trong kho dữ liệu ➡️ Tuyệt đối KHÔNG tự bịa link dạng `sapo.vn/...` hay link ngoài.
+1. **Ngôn ngữ chuẩn 100% Tiếng Việt:** TUYỆT ĐỐI KHÔNG xuất ra dòng suy nghĩ bằng tiếng Anh.
+2. **Kiểm soát Link tuyệt đối (Zero Hallucinated URLs):** CHỈ ĐƯỢC CUNG CẤP LINK nếu link đó có mặt 100% chính xác trong `{knowledge_context}`.
 3. **Định dạng Link chuẩn:** Đính kèm link chuẩn dạng `<URL>` hoặc `[Tên hiển thị](URL)`.
-
----
-
-# CHUẨN TRÌNH BÀY DÀNH CHO KỸ THUẬT (FORMATTING RULES)
-
-- **Đường dẫn thao tác rõ ràng:** Dùng dấu `>` để hướng dẫn từng bước (Ví dụ: **Control Panel** > **View devices and printers** > **Printer Properties**).
-- **Trình bày:** Sử dụng gạch đầu dòng, các từ khóa quan trọng và tên nút bấm phải **in đậm** bằng `**từ khóa**`.
-- **CẤM DÙNG BẢNG:** Tuyệt đối KHÔNG xuất bảng Markdown dưới mọi hình thức.
+4. **CẤM DÙNG BẢNG:** Tuyệt đối KHÔNG xuất bảng Markdown dưới mọi hình thức.
 
 ---
 
@@ -269,11 +261,11 @@ Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên k
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI GEMINI 3.6 FLASH CÓ RETRY BẢO VỆ
+# HÀM GỌI GEMINI API DỰ PHÒNG (TRÍCH XUẤT TỪ BẢN CODE V152.0 THÀNH CÔNG OF ANH)
 # ------------------------------------------------------------------------------
-async def call_gemini_with_retry(system_instruction: str, user_message: str) -> str:
+async def call_gemini_api(system_prompt: str, user_msg: str) -> str:
     if not GEMINI_API_KEY:
-        return "👋 Dạ em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thiết bị nào ạ?"
+        return "⚠️ Lỗi: Chưa cấu hình GEMINI_API_KEY."
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     headers = {
@@ -281,25 +273,45 @@ async def call_gemini_with_retry(system_instruction: str, user_message: str) -> 
         "x-goog-api-key": GEMINI_API_KEY
     }
     payload = {
-        "systemInstruction": {"parts": [{"text": system_instruction}]},
-        "contents": [{"role": "user", "parts": [{"text": user_message}]}],
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"role": "user", "parts": [{"text": user_msg}]}],
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2000}
     }
+    
+    try:
+        res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=10.0)
+        if res.status_code == 200:
+            data = res.json()
+            raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+            return clean_thinking_process(raw_text)
+        else:
+            return f"⚠️ Google API Lỗi HTTP [{res.status_code}]: {res.text[:200]}"
+    except Exception as e:
+        return f"⚠️ Lỗi Python: {str(e)}"
 
-    for attempt in range(3):
-        try:
-            res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=10.0)
-            if res.status_code == 200:
-                data = res.json()
-                raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
-                return clean_thinking_process(raw_text)
-            elif res.status_code in [503, 429]:
-                await asyncio.sleep(1.0)
-                continue
-        except Exception:
-            await asyncio.sleep(1.0)
-
-    return "👋 Dạ em đã nhận thông tin. Anh/chị cần hỗ trợ tra cứu thông số hay cài đặt thiết bị nào ạ?"
+# ------------------------------------------------------------------------------
+# HÀM GỌI GROQ INSTANT KHI DÍNH RATE LIMIT 429
+# ------------------------------------------------------------------------------
+async def call_groq_fallback_instant(system_instruction: str, user_message: str) -> str:
+    if not GROQ_API_KEY: return ""
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": "llama-3.1-8b-instant",
+        "messages": [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": user_message}
+        ],
+        "temperature": 0.2,
+        "max_tokens": 2000
+    }
+    try:
+        res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=6.0)
+        if res.status_code == 200:
+            data = res.json()
+            return clean_thinking_process(data["choices"][0]["message"]["content"])
+    except Exception: pass
+    return ""
 
 async def call_llm_single(system_instruction: str, user_message: str) -> str:
     if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
@@ -318,12 +330,13 @@ async def call_llm_single(system_instruction: str, user_message: str) -> str:
             res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
             if res.status_code == 200:
                 data = res.json()
-                raw_text = data["choices"][0]["message"]["content"]
-                return clean_thinking_process(raw_text)
-        except Exception:
-            pass
+                return clean_thinking_process(data["choices"][0]["message"]["content"])
+        except Exception: pass
 
-    return await call_gemini_with_retry(system_instruction, user_message)
+    instant_ans = await call_groq_fallback_instant(system_instruction, user_message)
+    if instant_ans: return instant_ans
+
+    return await call_gemini_api(system_instruction, user_message)
 
 def wrap_gsuite_addon_response(text_message: str) -> dict:
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', text_message)
@@ -340,7 +353,7 @@ def wrap_gsuite_addon_response(text_message: str) -> dict:
     }
 
 # ------------------------------------------------------------------------------
-# 1. CỔNG WEB CHAT (/chat) - SỬA LỖI MẤT NHỚ FAILOVER
+# 1. CỔNG WEB CHAT (/chat)
 # ------------------------------------------------------------------------------
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
@@ -353,7 +366,7 @@ async def chat_stream(req: ChatRequest):
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
-    # Ghép 3 câu nói gần nhất để giữ nguyên tên máy (SPR02, SPL01...) xuyên suốt cuộc hội thoại
+    # GHÉP 3 CÂU NÓI GẦN NHẤT ĐỂ GIỮ NGUYÊN TÊN MÁY KHI DỰ PHÒNG SANG GEMINI
     user_msgs = [m["text"] for m in req.messages if m.get("role") in ["user", "Khach_Hang"]]
     combined_query = " ".join(user_msgs[-3:]) if user_msgs else latest_msg
 
@@ -363,7 +376,7 @@ async def chat_stream(req: ChatRequest):
     async def generate_response_stream():
         has_yielded = False
         
-        # 1. ƯU TIÊN GROQ STREAMING
+        # 1. ƯU TIÊN GROQ STREAMING MODEL CHÍNH
         if GROQ_API_KEY and ACTIVE_GROQ_MODEL:
             messages_payload = [{"role": "system", "content": system_instruction}]
             trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
@@ -392,7 +405,6 @@ async def chat_stream(req: ChatRequest):
                                     choices = data_json.get("choices", [])
                                     if choices:
                                         chunk = choices[0].get("delta", {}).get("content", "")
-                                        # Loại bỏ thẻ <think> trong lúc stream
                                         if chunk and not chunk.startswith("<think>"):
                                             has_yielded = True
                                             yield chunk
@@ -401,9 +413,16 @@ async def chat_stream(req: ChatRequest):
                             return
             except Exception: pass
 
-        # 2. DỰ PHÒNG SANG GEMINI VỚI TRỌN VẸN CẢ NGỮ CẢNH HỘI THOẠI (SỬA DỨT ĐIỂM DÒNG 268 CŨ)
+        # 2. DỰ PHÒNG TẦNG 1: GROQ INSTANT
         if not has_yielded:
-            fallback_ans = await call_gemini_with_retry(system_instruction, combined_query)
+            instant_ans = await call_groq_fallback_instant(system_instruction, combined_query)
+            if instant_ans:
+                yield instant_ans
+                return
+
+        # 3. DỰ PHÒNG TẦNG 2: GEMINI 3.6 FLASH VỚI TRỌN VẸN NGỮ CẢNH COMBINED_QUERY
+        if not has_yielded:
+            fallback_ans = await call_gemini_api(system_instruction, combined_query)
             yield fallback_ans
 
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
@@ -432,5 +451,5 @@ async def google_chat_webhook(request: Request):
         ai_response = await call_llm_single(system_instruction, cleaned_message)
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
-    except Exception:
-        return JSONResponse(content=wrap_gsuite_addon_response("👋 Dạ em đã nhận thông tin. Anh/chị cần tra cứu cài đặt hay khắc phục lỗi thiết bị nào ạ?"))
+    except Exception as e:
+        return JSONResponse(content=wrap_gsuite_addon_response(f"⚠️ Lỗi Google Chat Webhook: {str(e)}"))
