@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Intelligent Context Engine", version="1400.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Strict Error Procedure Engine", version="1500.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,8 +100,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "1400.0", 
-        "engine": "Intelligent Context Engine",
+        "version": "1500.0", 
+        "engine": "Strict Error Procedure Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -163,14 +163,17 @@ def extract_user_text(event: dict) -> str:
     return deep_search(event)
 
 # ------------------------------------------------------------------------------
-# TRÍCH XUẤT DỮ LIỆU RAG MULTI-TAB
+# TRÍCH XUẤT DỮ LIỆU RAG MULTI-TAB (TỐI ƯU CẮT BỎ TỪ KHÓA LỖI CŨ)
 # ------------------------------------------------------------------------------
 def get_high_precision_knowledge(query: str, role: str) -> str:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     query_lower = query.lower()
     
-    stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "thế", "nào", "bao", "nhiêu", "thông", "số", "qua", "đã", "ok"}
-    words = [w for w in query_lower.split() if len(w) > 1 and w not in stop_words]
+    # Lọc bỏ các cụm từ chuyển ngữ cảnh lỗi đã xử lý xong
+    cleaned_query = re.sub(r'đã (khắc phục|sửa|xong|ok|được).*?(nhưng|mà|lại)', '', query_lower)
+    
+    stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "thế", "nào", "bao", "nhiêu", "thông", "số", "qua", "đã", "ok", "rồi", "nhưng", "lại"}
+    words = [w for w in cleaned_query.split() if len(w) > 1 and w not in stop_words]
     if not words: words = [query_lower]
 
     scored_rows = []
@@ -179,20 +182,25 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
             row_text = " ".join(str(v).lower() for v in row.values())
             score = 0
             
-            for w in words:
-                if w in row_text:
-                    score += 10
+            key_field = str(row.get("Tu_Khoa_Nhan_Dien", "")) + " " + str(row.get("Trieu_Chung_Thuc_Te", "")) + " " + str(row.get("Ten_Loi", "")) + " " + str(row.get("Ten_Thiet_Bi", ""))
+            key_field_lower = key_field.lower()
             
-            key_field = str(row.get("Ten_Thiet_Bi", row.get("Loai_Thiet_Bi", row.get("Ten_Loi", row.get("Ten_Chinh_Sach", row.get("Tu_Khoa_Nhan_Dien", "")))))).lower()
+            # Ưu tiên cộng điểm cực cao nếu khớp cụm từ sự cố chính
+            for phrase in ["không cắt giấy", "in không cắt", "kẹt dao", "không ra mực", "ra giấy trắng"]:
+                if phrase in cleaned_query and phrase in key_field_lower:
+                    score += 300
+            
             for w in words:
-                if len(w) >= 2 and w in key_field:
-                    score += 100
+                if w in key_field_lower:
+                    score += 50
+                elif w in row_text:
+                    score += 5
 
             if score > 0:
                 scored_rows.append((score, tab, row))
 
     scored_rows.sort(key=lambda x: x[0], reverse=True)
-    top_matches = scored_rows[:3]
+    top_matches = scored_rows[:2]
 
     knowledge_text = ""
     for score, tab, row in top_matches:
@@ -204,7 +212,7 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
     return knowledge_text
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG & BỘ QUY TẮC CỦA ANH
+# SYSTEM PROMPT SIẾT CHẶT QUY TRÌNH XUẤT ĐẦY ĐỦ CÁC BƯỚC SỬA LỖI
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
@@ -226,33 +234,26 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
      "Dạ, về **[Chủ đề]**, anh/chị đang cần tra cứu quy định hoặc hướng dẫn cụ thể nào ạ?"
 
 2. TRƯỜNG HỢP 2: CÂU HỎI ĐÃ CÓ Ý ĐỊNH RÕ RÀNG HOẶC HỎI SỬA LỖI
-(Ví dụ: "cài driver spr02 máy tính", "spr02 in ra giấy trắng", "chính sách bảo hành 12 tháng"):
-👉 Trả lời TRỰC DIỆN từng bước khắc phục/cài đặt.
+(Ví dụ: "cài driver spr02 máy tính", "spr02 in ra giấy trắng", "in không cắt giấy", "chính sách bảo hành 12 tháng"):
+
+👉 🛑 QUY TẮC XUẤT QUY TRÌNH SỬA LỖI (ERROR PROCEDURE STRICT RULE - RẤT QUAN TRỌNG):
+   - Khi tìm thấy giải pháp trong cột Cach_Khac_Phuc (Cách khắc phục):
+     -> AI BẮT BUỘC TRÍCH XUẤT VÀ HƯỚNG DẪN ĐẦY ĐỦ TOÀN BỘ CÁC BƯỚC KỸ THUẬT NÊU TRONG DỮ LIỆU (Self-test nút FEED, Cấu hình Driver Windows, Kiểm tra cuộn giấy...).
+     -> TUYỆT ĐỐI CẤM chỉ trích xuất một câu Cảnh báo/Lưu ý phụ (như lưu ý về giấy tem) rồi ngắt lời hỏi lại khách! 
+     -> Mọi lưu ý hoặc cảnh báo BẮT BUỘC phải đặt ở CUỐI BÀI sau khi đã hướng dẫn xong các bước kỹ thuật.
 
 👉 🛑 QUY TẮC ĐÍNH KÈM LINK TỪNG BƯỚC (INLINE STEP-LINK RULE):
-   - Nếu trong ô Dữ liệu gốc ở MỖI BƯỚC CÓ ĐÍNH KÈM LINK ẢNH / LINK VIDEO RIÊNG (Ví dụ: Bước 1 có link ảnh 1, Bước 2 có link ảnh 2):
-     -> AI BẮT BUỘC phải đặt link ảnh/video đó NGAY DƯỚI BƯỚC TƯƠNG ỨNG! 
-     -> Ví dụ trình bày:
-        1. **Kiểm tra chiều giấy:** Kiểm tra xem cuộn giấy đã lắp đúng chiều chưa.
-           👉 Hình ảnh hướng dẫn: <Link ảnh bước 1 trong dữ liệu>
-        2. **Vệ sinh đầu in:** Kiểm tra khu vực đầu in xem có mảnh giấy thừa che khuất hay không.
-           👉 Hình ảnh hướng dẫn: <Link ảnh bước 2 trong dữ liệu>
-        3. **Thay thử giấy:** Đổi sang cuộn giấy mới nếu 2 cách trên không được.
-   - TUYỆT ĐỐI KHÔNG GỘM NGUYÊN ĐỐNG LINK VỀ CUỐI BÀI!
-   - TUYỆT ĐỐI KHÔNG BỎ SÓT BẤT KỲ LINK NÀO CÓ TRONG DỮ LIỆU GỐC!
+   - Nếu ở MỖI BƯỚC CÓ ĐÍNH KÈM LINK ẢNH / LINK VIDEO RIÊNG:
+     -> AI BẮT BUỘC phải đặt link ảnh/video đó NGAY DƯỚI BƯỚC TƯƠNG ỨNG.
+     -> TUYỆT ĐỐI KHÔNG GỘM NGUYÊN ĐỐNG LINK VỀ CUỐI BÀI!
 
-🧠 QUY TẮC DUY TRÌ BỐI CẢNH & TRA CỨU DỮ LIỆU (BẮT BUỘC):
+🧠 QUY TẮC DUY TRÌ BỐI CẢNH & CHUYỂN NGỮ CẢNH:
    1. GHI NHỚ BỐI CẢNH (Context Memory):
-      - Khi người dùng hỏi tiếp trong cuộc trò chuyện (ví dụ: "nhưng in không cắt giấy", "còn lỗi này thì sao"), BẮT BUỘC phải giữ nguyên loại thiết bị/model đang thảo luận ở các câu trước (Ví dụ: Máy in hóa đơn K200L, SPR01, SPR02...). 
+      - Khi người dùng hỏi tiếp trong cuộc trò chuyện (ví dụ: "nhưng in không cắt giấy", "còn lỗi này thì sao"), BẮT BUỘC phải giữ nguyên loại thiết bị/model đang thảo luận ở các câu trước (Ví dụ: Máy in hóa đơn K200L, SPR01, SPR02...).
       - TUYỆT ĐỐI KHÔNG hỏi lại model máy nếu ở câu trước người dùng hoặc AI đã xác định loại thiết bị đó rồi.
 
-   2. TÁCH TỪ KHÓA CHÍNH (Intent Extraction):
-      - Người dùng thường nói câu dài chứa văn cảnh (ví dụ: "mình lấy giấy bị che rồi, nhưng in không cắt giấy").
-      - AI phải tự lọc ra từ khóa sự cố chính: "in không cắt giấy" / "không cắt giấy" / "kẹt dao cắt".
-      - Tiến hành đối chiếu từ khóa này với cột `Tu_Khoa_Nhan_Dien` và `Trieu_Chung_Thuc_Te` trong Kho dữ liệu để lấy ngay giải pháp `Cach_Khac_Phuc`.
-
-   3. NẾU TÌM THẤY DỮ LIỆU CÓ CHỨA TỪ KHÓA:
-      - Trả lời ngay hướng dẫn khắc phục, tuyệt đối KHÔNG báo "không có thông tin".
+   2. XỬ LÝ CHUYỂN LỖI (Switch Error Intent):
+      - Khi người dùng báo lỗi A đã sửa xong nhưng bị lỗi B -> AI BẮT BUỘC tập trung 100% vào việc đưa quy trình sửa LỖI B cho khách!
 
 🛑 LUẬT THÉP ĐỊNH DẠNG:
 - TUYỆT ĐỐI CẤM sử dụng mã LaTeX toán học (như $\\rightarrow$, $\\Rightarrow$). Dùng dấu mũi tên "➔" hoặc "->".
