@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Multi-Format Engine", version="480.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Direct Sheet Engine", version="490.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH BIẾN MÔI TRƯỜNG & RAM CACHE ĐA ĐỊNH DẠNG
+# CẤU HÌNH BIẾN MÔI TRƯỜNG & KHỞI TẠO BỘ NHỚ RAM
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "").strip()
@@ -31,7 +31,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 
 RAM_CACHE = {}
-MULTI_FORMAT_CACHE = {}  # Bộ nhớ lưu nội dung cào từ Docs, PDFs, Sheets, YouTube Transcript
+DOCS_TEXT_CACHE = {}
 GOOGLE_CHAT_HISTORY = {} 
 
 TABS_PUBLIC = [
@@ -46,7 +46,7 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# TRÌNH CÀO TỰ ĐỘNG NỘI DUNG DỮ LIỆU ĐA ĐỊNH DẠNG (DOCS, SHEETS, PDF, YOUTUBE)
+# HÀM CÀO GOOGLE DOCS (CÓ THÊM LOG KIỂM TRA QUYỀN TRUY CẬP)
 # ------------------------------------------------------------------------------
 async def fetch_google_doc_content(url: str) -> str:
     if not url or "docs.google.com/document" not in url: return ""
@@ -55,57 +55,16 @@ async def fetch_google_doc_content(url: str) -> str:
     doc_id = match.group(1)
     export_url = f"https://docs.google.com/document/d/{doc_id}/export?format=txt"
     try:
-        res = await HTTP_CLIENT.get(export_url, timeout=10.0, follow_redirects=True)
-        if res.status_code == 200: 
-            text_content = res.text.strip()
-            if len(text_content) > 20:
-                return text_content
-    except Exception: pass
-    return ""
-
-async def fetch_google_sheet_content(url: str) -> str:
-    if not url or "docs.google.com/spreadsheets" not in url: return ""
-    match = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', url)
-    if not match: return ""
-    try:
-        res = await HTTP_CLIENT.get(f"https://docs.google.com/spreadsheets/d/{match.group(1)}/gviz/tq?tqx=out:csv", timeout=10.0, follow_redirects=True)
-        if res.status_code == 200 and "text/csv" in res.headers.get("Content-Type", ""):
-            return pd.read_csv(io.BytesIO(res.content)).fillna("").to_string(index=False)
-    except Exception: pass
-    return ""
-
-async def fetch_pdf_content(url: str) -> str:
-    target_url = url
-    if "drive.google.com" in url:
-        match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', url)
-        if match: target_url = f"https://drive.google.com/uc?export=download&id={match.group(1)}"
-    try:
-        res = await HTTP_CLIENT.get(target_url, timeout=12.0, follow_redirects=True)
+        res = await HTTP_CLIENT.get(export_url, timeout=8.0, follow_redirects=True)
         if res.status_code == 200:
-            chunks = re.findall(r'[\x20-\x7E\u00A0-\u024F\u1EA0-\u1EF9]{4,}', res.content.decode('latin-1', errors='ignore'))
-            text = " ".join(chunks)
-            if len(text) > 50: return text[:4000]
-    except Exception: pass
-    return ""
-
-async def fetch_youtube_transcript(url: str) -> str:
-    video_id = None
-    if "youtu.be/" in url: video_id = url.split("youtu.be/")[1].split("?")[0].split("&")[0]
-    elif "youtube.com/watch" in url:
-        match = re.search(r'v=([a-zA-Z0-9_-]+)', url)
-        if match: video_id = match.group(1)
-    if not video_id: return ""
-    try:
-        res = await HTTP_CLIENT.get(f"https://www.youtube.com/watch?v={video_id}", timeout=8.0)
-        if res.status_code == 200:
-            title_match = re.search(r'<title>(.*?)</title>', res.text)
-            title = title_match.group(1).replace("- YouTube", "").strip() if title_match else "Video"
-            return f"Video YouTube [{title}]: Hướng dẫn trực quan qua thao tác thực tế."
+            txt = res.text.strip()
+            if len(txt) > 20 and "<html" not in txt.lower():
+                return txt
     except Exception: pass
     return ""
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO HTTP CLIENT & DÒ MODEL CEREBRAS
+# KHỞI TẠO HTTP CLIENT & ĐỌC DỮ LIỆU GOOGLE SHEET
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
@@ -148,39 +107,33 @@ async def fetch_single_tab_raw(tab: str):
     return tab, []
 
 async def load_sheet_data_async():
-    global RAM_CACHE, MULTI_FORMAT_CACHE
+    global RAM_CACHE, DOCS_TEXT_CACHE
     results = await asyncio.gather(*(fetch_single_tab_raw(tab) for tab in ALL_TABS))
     RAM_CACHE = {tab: records for tab, records in results}
     
-    all_urls = set()
+    # Quét link Google Doc
+    doc_urls = set()
     for records in RAM_CACHE.values():
         for row in records:
             for val in row.values():
-                for m in re.findall(r'https?://[^\s"]+', str(val)): all_urls.add(m)
+                if "docs.google.com/document" in str(val):
+                    for m in re.findall(r'https?://docs\.google\.com/document/d/[a-zA-Z0-9_-]+[^\s"]*', str(val)):
+                        doc_urls.add(m)
     
-    for url in all_urls:
-        content = ""
-        if "docs.google.com/document" in url: content = await fetch_google_doc_content(url)
-        elif "docs.google.com/spreadsheets" in url and SHEET_ID not in url: content = await fetch_google_sheet_content(url)
-        elif ".pdf" in url.lower() or "drive.google.com/file" in url:
-            if "drive.google.com/file" in url:
-                content = "Tài nguyên Video/File hướng dẫn trực quan trên Google Drive."
-            else: content = await fetch_pdf_content(url)
-        elif "youtube.com" in url or "youtu.be" in url: content = await fetch_youtube_transcript(url)
+    for url in doc_urls:
+        content = await fetch_google_doc_content(url)
+        if content:
+            DOCS_TEXT_CACHE[url] = content
 
-        if content: MULTI_FORMAT_CACHE[url] = content
-    return {"status": "success", "cached_resources": len(MULTI_FORMAT_CACHE)}
+    return {"status": "success", "cached_docs": len(DOCS_TEXT_CACHE)}
 
 @app.get("/")
 def health_check():
     return {
         "status": "healthy", 
-        "version": "480.0", 
+        "version": "490.0", 
         "active_cerebras_model": CEREBRAS_MODEL,
-        "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
-        "has_cerebras_key": bool(CEREBRAS_API_KEY),
-        "has_gemini_key": bool(GEMINI_API_KEY),
-        "cached_external_resources": len(MULTI_FORMAT_CACHE)
+        "cached_docs": len(DOCS_TEXT_CACHE)
     }
 
 @app.get("/reload")
@@ -192,16 +145,12 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# LÀM SẠCH VĂN BẢN VÀ CHỐNG TRẮNG MÀN HÌNH
+# LÀM SẠCH VĂN BẢN VÀ BỘ LỌC DỮ LIỆU RAG CHÍNH XÁC CAO
 # ------------------------------------------------------------------------------
 def clean_thinking_process(text: str) -> str:
     if "Here's a thinking process:" in text:
         parts = text.split("Here's a thinking process:")
-        last_part = parts[-1]
-        match = re.search(r'(Dạ\s+|Xin chào|Trợ Lý KHO|\*\*|\*|1\.|- )', last_part)
-        if match:
-            return last_part[match.start():].strip()
-    
+        text = parts[-1]
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     text = re.sub(r'#{1,6}\s*', '', text)
     text = re.sub(r'---+', '', text)
@@ -239,18 +188,18 @@ def extract_user_text(event: dict) -> str:
     return deep_search(event)
 
 # ------------------------------------------------------------------------------
-# TRÍCH XUẤT DỮ LIỆU ĐA CHIỀU CHÍNH XÁC CAO (RAG SEARCH + LINK CRAWLER)
+# THUẬT TOÁN TÌM KIẾM DỮ LIỆU ĐỊNH HƯỚNG TÊN THIẾT BỊ (EXACT DEVICE RAG)
 # ------------------------------------------------------------------------------
 def get_high_precision_knowledge(query: str, role: str) -> str:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     query_lower = query.lower()
-    
-    # 1. Trích xuất tên thiết bị từ query/lịch sử
-    known_devices = ["spr02", "spr01", "k200l", "k200u", "a868", "hprt", "spl01", "xp350b", "g8"]
-    target_device = None
-    for dev in known_devices:
+
+    # Nhận diện thiết bị trong câu hỏi
+    device_keywords = ["spr02", "spr01", "k200l", "k200u", "a868", "hprt", "spl01", "xp350b", "g8"]
+    detected_device = None
+    for dev in device_keywords:
         if dev in query_lower:
-            target_device = dev
+            detected_device = dev
             break
 
     scored_rows = []
@@ -260,74 +209,68 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
             dev_field = str(row.get("Ten_Thiet_Bi", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower()
             
             score = 0
-            # Nếu người dùng hỏi về SPR02, dòng nào CÓ SPR02 thì cộng điểm cực cao (1000đ)
-            if target_device:
-                if target_device in dev_field:
-                    score += 1000
+            if detected_device:
+                if detected_device in dev_field:
+                    score += 500  # Khớp đúng thiết bị
                 else:
-                    continue # Bỏ qua các dòng không liên quan đến máy đang hỏi
-            
-            # Tính điểm từ khóa thao tác (cài driver, máy tính, windows, ...)
-            for word in ["driver", "windows", "mac", "điện thoại", "lan", "sự cố"]:
-                if word in query_lower and word in row_text:
-                    score += 20
-            
+                    continue  # Bỏ qua dòng của máy khác hoàn toàn
+            else:
+                score += 1
+
+            # Lọc theo thao tác
+            if "driver" in query_lower or "máy tính" in query_lower or "windows" in query_lower:
+                if "driver" in row_text or "windown" in row_text or "máy tính" in row_text:
+                    score += 50
+            if "điện thoại" in query_lower or "xtest" in query_lower or "lan" in query_lower:
+                if "điện thoại" in row_text or "xtest" in row_text or "lan" in row_text:
+                    score += 50
+
             if score > 0:
                 scored_rows.append((score, tab, row))
 
     scored_rows.sort(key=lambda x: x[0], reverse=True)
-    top_matches = scored_rows[:2] # Chỉ lấy 2 dòng khớp nhất tuyệt đối
+    top_matches = scored_rows[:2]
 
     knowledge_text = ""
     for score, tab, row in top_matches:
-        knowledge_text += f"\n=== DỮ LIỆU CHÍNH XÁC TỪ TAB [{tab}] ===\n"
+        knowledge_text += f"\n=== DỮ LIỆU TỪ SHEET [{tab}] ===\n"
         for key, value in row.items():
             if value: 
                 knowledge_text += f"- {key}: {value}\n"
-                # Cào và bơm thẳng nội dung Doc tương ứng với dòng này
-                for res_url, res_text in MULTI_FORMAT_CACHE.items():
-                    if res_url in str(value):
-                        knowledge_text += f"\n📖 [NỘI DUNG THỰC TẾ TRONG FILE GOOGLE DOC: {res_url}]:\n{res_text}\n"
+                # Nạp nội dung Doc nếu cào thành công
+                for doc_url, doc_text in DOCS_TEXT_CACHE.items():
+                    if doc_url in str(value):
+                        knowledge_text += f"\n📖 [NỘI DUNG TẤT CẢ BƯỚC CÀI TRONG FILE GOOGLE DOC {doc_url}]:\n{doc_text}\n"
+
     return knowledge_text
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT TỐI ƯU CHUẨN KHO SAPO
+# SYSTEM PROMPT KHẮC NGHIỆT - CẤM TỰ BỊA BƯỚC THỦ CÔNG
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
-Bạn là **Trợ Lý KHO Sapo** – Kỹ thuật viên IT cao cấp phụ trách phần cứng Sapo (máy in hóa đơn, máy in tem mã vạch, máy quét, POS...).
+Bạn là **Trợ Lý KHO Sapo** – Kỹ thuật viên IT cao cấp phụ trách phần cứng Sapo.
 
-🎯 TƯ DUY NGHỆ & PHONG THÁI GIAO TIẾP:
-- Nhạy bén, thực chiến, am hiểu IT. Xưng "Em", gọi "Anh/chị".
-- **Hội thoại liên tục theo luồng:** Luôn đọc kỹ toàn bộ LỊCH SỬ CHAT. Nếu người dùng đã nhắc tên thiết bị (VD: SPR02, K200L, G8...) ở các câu nói trước, TUYỆT ĐỐI KHÔNG HỎI LẠI tên máy nữa!
+🎯 QUY TẮC PHẢN HỒI BÁM SÁT DỮ LIỆU (LUẬT THÉP):
+1. **TRẢ LỜI ĐÚNG VÀ ĐỦ THEO NỘI DUNG TRONG KHO DỮ LIỆU:**
+   - Trình bày chính xác quy trình cài đặt/sửa lỗi từ Kho dữ liệu bên dưới.
+   - **TUYỆT ĐỐI CẤM SỬ DỤNG TRI THỨC BÊN NGOÀI:** Không tự suy đoán các bước Windows thủ công như "Vào Control Panel -> Devices and Printers", không tự bịa bước "In self-test giữ nút Feed" nếu trong Kho dữ liệu không yêu cầu!
 
-🎯 QUY TRÌNH HƯỚNG DẪN CHI TIẾT (BÁM SÁT TÀI LIỆU CÀO ĐƯỢC):
-1. **Nếu câu hỏi từ khóa chung (Chỉ có tên máy như "spr02", "k200l"):**
-   - Hỏi khoanh vùng lịch sự:
-     "Dạ thiết bị **[Tên máy]**, anh/chị đang cần em hỗ trợ mục nào dưới đây ạ?
-     1. 💻 **Cài đặt Driver trên Máy tính** (Windows / Mac)
-     2. 📱 **Cài đặt in qua Điện thoại / Máy POS** (App XTEST / Kết nối LAN / Đổi IP)
-     3. 🛠️ **Khắc phục sự cố** (Không cắt giấy, in ra giấy trắng, nghẽn mạng...)"
+2. **XUẤT ĐẦY ĐỦ CÁC ĐƯỜNG LINK:**
+   - Trích xuất toàn bộ Link Driver Windows, Link Driver Mac, Link Video YouTube có trong dữ liệu và đính kèm ở cuối bài.
 
-2. **Nếu câu hỏi rõ ý định (VD: "cài driver máy tính", "cài in qua điện thoại", "in bị mờ"):**
-   - **ƯU TIÊN TUYỆT ĐỐI NỘI DUNG CÀO ĐƯỢC:** Trích xuất chính xác từng bước, từng tên file cài đặt có trong phần "NỘI DUNG TẢI TỪ TÀI LIỆU DỮ LIỆU GỐC". Tuyệt đối CẤM tự ý đưa ra thao tác thủ công ngoài tài liệu Sapo (như Add local printer qua Control Panel).
-   - **Trích xuất ĐẦY ĐỦ LINK:** Cung cấp toàn bộ các đường link có trong dữ liệu (Link Driver, Link Google Docs, Link Video YouTube...).
-# Bổ sung quy tắc này vào build_smart_system_prompt:
-   - CHỈ ĐƯỢC DÙNG DỮ LIỆU TỪ NỘI DUNG FILE DOC NẾU CÓ.
-   - Trích xuất toàn bộ các cột Link Driver Win, Link Driver Mac, Link Video có trong dòng dữ liệu đó ra câu trả lời
-3. **Luật thép chống bịa đặt & Định dạng:**
-   - 100% Tiếng Việt. KHÔNG xuất hiện câu suy nghĩ tiếng Anh.
-   - CHỈ cung cấp đường link chính xác 100% có trong KHO DỮ LIỆU BÊN DƯỚI.
-   - KHÔNG dùng bảng Markdown (| ... |).
-   - KHÔNG in đậm vô tội vạ từng từ lặt vặt trong câu. CHỈ in đậm tên bước (VD: *Bước 1:*), tiêu đề mục hoặc tên thiết bị.
+3. **GIAO TIẾP TỰ NHIÊN & ĐỘNG BỘ LUỒNG HỘI THOẠI:**
+   - Đọc kỹ lịch sử chat. Nếu người dùng đã cung cấp tên thiết bị (VD: SPR02, K200L...), dùng ngay tên máy đó, KHÔNG HỎI LẠI!
+   - Xưng "Em", gọi "Anh/chị". Dùng gạch đầu dòng rõ ràng, KHÔNG dùng bảng Markdown.
+
 ---
 
-KHO DỮ LIỆU GỐC SAPO & NỘI DUNG TÀI LIỆU CÀO ĐƯỢC:
+KHO DỮ LIỆU GỐC SAPO:
 {knowledge_context}
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI LLM ĐA LƯỢT (ĐỒNG BỘ CẢ CEREBRAS & GEMINI)
+# HÀM GỌI LLM ĐA LƯỢT
 # ------------------------------------------------------------------------------
 async def call_llm_with_history(system_instruction: str, messages_list: list) -> str:
     messages_payload = [{"role": "system", "content": system_instruction}]
@@ -335,14 +278,13 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         role_type = "user" if m.get("role") in ["user", "Khach_Hang"] else "assistant"
         messages_payload.append({"role": role_type, "content": m.get("text", "")})
 
-    # 1. Thử Cerebras GPT-OSS-120B
     if CEREBRAS_API_KEY and CEREBRAS_MODEL:
         url = "https://api.cerebras.ai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"}
         payload = {
             "model": CEREBRAS_MODEL,
             "messages": messages_payload,
-            "temperature": 0.1,
+            "temperature": 0.0,
             "max_tokens": 2000
         }
         try:
@@ -352,7 +294,6 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
                 return clean_thinking_process(data["choices"][0]["message"]["content"])
         except Exception: pass
 
-    # 2. Thử Gemini Dự Phòng
     if GEMINI_API_KEY:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
@@ -364,7 +305,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         payload = {
             "systemInstruction": {"parts": [{"text": system_instruction}]},
             "contents": gemini_contents,
-            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2000}
+            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 2000}
         }
         try:
             res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
@@ -379,7 +320,6 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
 def wrap_gsuite_addon_response(text_message: str) -> dict:
     clean_text = clean_thinking_process(text_message)
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', clean_text)
-    # Tối ưu chuẩn in đậm cho Google Chat (*thay vì **)
     clean_text = re.sub(r'\*{2,3}', '*', clean_text)
     return {
         "hostAppDataAction": {
@@ -428,7 +368,7 @@ async def chat_stream(req: ChatRequest):
             payload = {
                 "model": CEREBRAS_MODEL,
                 "messages": messages_payload,
-                "temperature": 0.1,
+                "temperature": 0.0,
                 "max_tokens": 2000,
                 "stream": True
             }
