@@ -237,7 +237,6 @@ Bạn là **Trợ Lý KHO Sapo** – Kỹ thuật viên IT cao cấp phụ trác
 4. **CẤM DÙNG BẢNG VÀ LẠM DỤNG IN ĐẬM:**
    - KHÔNG dùng bảng Markdown (| ... |).
    - KHÔNG in đậm vô tội vạ từng từ lặt vặt trong câu. CHỈ in đậm tên bước (VD: *Bước 1:*), tiêu đề mục hoặc tên thiết bị.
-
 ---
 
 KHO DỮ LIỆU GỐC SAPO:
@@ -295,12 +294,10 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
     return "👋 Dạ em chào anh/chị! Em là **Trợ Lý KHO Sapo**. Anh/chị cần em hỗ trợ cài đặt hay tra cứu thiết bị nào ạ?"
 
 def wrap_gsuite_addon_response(text_message: str) -> dict:
-    clean_text = sanitize_response_content(text_message)
+    clean_text = clean_thinking_process(text_message)
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', clean_text)
-    
     # ⚡ ĐIỂM SỬA CHÍNH: Chuyển toàn bộ ** hoặc *** thành * chuẩn in đậm của Google Chat
     clean_text = re.sub(r'\*{2,3}', '*', clean_text)
-    
     return {
         "hostAppDataAction": {
             "chatDataAction": {
