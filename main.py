@@ -16,15 +16,16 @@ from pydantic import BaseModel
 
 
 # ==============================================================================
-# TRỢ LÝ KHO SAPO - VERSION 500
+# TRỢ LÝ KHO SAPO - VERSION 500 (CẢI TIẾN)
 # Kiến trúc:
 # 1) Python xử lý state / menu / nhận diện thiết bị / intent cơ bản
 # 2) Google Sheet là nguồn dữ liệu sự thật
 # 3) LLM chỉ dùng để hiểu câu hỏi và diễn đạt câu trả lời
 # 4) Không cho LLM tự bịa link, model, thông số
+# 5) Không hỏi lại model nếu đã có thiết bị trong session
 # ==============================================================================
 
-APP_VERSION = "500.0"
+APP_VERSION = "500.1"
 
 app = FastAPI(
     title="Trợ Lý KHO Sapo - Smart Router & Knowledge Engine",
@@ -52,7 +53,7 @@ CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "").strip()
 CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "gpt-oss-120b").strip()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()  # đổi sang flash để nhanh hơn
 
 # Cache dữ liệu Google Sheet trong RAM.
 RAM_CACHE: Dict[str, List[Dict[str, str]]] = {}
@@ -321,70 +322,34 @@ def clean_google_chat_text(text: str) -> str:
 # ==============================================================================
 
 def extract_user_text(event: dict) -> str:
-    if not isinstance(event, dict):
-        return ""
+    # Ưu tiên lấy từ message.text
+    if isinstance(event.get("message"), dict) and event["message"].get("text"):
+        return str(event["message"]["text"])
 
-    if isinstance(event.get("message"), dict):
-        msg = event["message"]
+    # fallback cho argumentText
+    if isinstance(event.get("message"), dict) and event["message"].get("argumentText"):
+        return str(event["message"]["argumentText"])
 
-        if msg.get("text"):
-            return str(msg["text"])
+    # fallback chung
+    if isinstance(event.get("text"), str):
+        return str(event["text"])
 
-        if msg.get("argumentText"):
-            return str(msg["argumentText"])
-
-    if isinstance(event.get("chat"), dict):
-        chat = event["chat"]
-
-        payload = chat.get("messagePayload")
-
-        if isinstance(payload, dict):
-            msg = payload.get("message")
-
-            if isinstance(msg, dict):
-                if msg.get("text"):
-                    return str(msg["text"])
-
-                if msg.get("argumentText"):
-                    return str(msg["argumentText"])
-
-        msg = chat.get("message")
-
-        if isinstance(msg, dict):
-            if msg.get("text"):
-                return str(msg["text"])
-
-            if msg.get("argumentText"):
-                return str(msg["argumentText"])
-
+    # deep search cuối cùng
     def deep_search(obj):
         if isinstance(obj, dict):
-            if (
-                isinstance(obj.get("argumentText"), str)
-                and obj["argumentText"].strip()
-            ):
+            if isinstance(obj.get("argumentText"), str) and obj["argumentText"].strip():
                 return obj["argumentText"]
-
-            if (
-                isinstance(obj.get("text"), str)
-                and obj["text"].strip()
-                and not obj["text"].startswith("spaces/")
-            ):
+            if isinstance(obj.get("text"), str) and obj["text"].strip() and not obj["text"].startswith("spaces/"):
                 return obj["text"]
-
             for value in obj.values():
                 result = deep_search(value)
-
                 if result:
                     return result
-
         elif isinstance(obj, list):
             for item in obj:
                 result = deep_search(item)
-
                 if result:
                     return result
-
         return ""
 
     return deep_search(event)
@@ -805,24 +770,33 @@ def score_row(
     intent_keywords = {
         "driver": [
             "driver", "cai dat", "windows", "mac", "macos",
-            "download", "tai",
+            "download", "tai", "exe", "dmg", "link tai", "huong dan cai"
         ],
         "mobile": [
             "dien thoai", "pos", "xtest", "lan", "ip", "android",
-            "iphone",
+            "iphone", "ket noi wifi"
         ],
         "troubleshoot": [
             "loi", "khong in", "giay trang", "khong cat",
             "nghen mang", "den do", "khong ket noi", "su co",
+            "kẹt", "không ra giấy"
         ],
         "info": [
             "thong so", "model", "usb", "lan", "bluetooth",
+            "kich thuoc", "can nang"
         ],
     }
 
-    for keyword in intent_keywords.get(intent or "", []):
-        if normalize_text(keyword) in text:
-            score += 15
+    if intent and intent in intent_keywords:
+        for keyword in intent_keywords[intent]:
+            kw_norm = normalize_text(keyword)
+            if kw_norm in text:
+                score += 20
+
+    # Ưu tiên các dòng có link (URL) khi intent là driver hoặc info
+    if intent in ("driver", "info"):
+        if "http" in text:
+            score += 50
 
     return score
 
@@ -946,6 +920,111 @@ def get_high_precision_knowledge(
         blocks.append("\n".join(block))
 
     return "\n\n".join(blocks)
+
+
+# ==============================================================================
+# KNOWLEDGE QUALITY CHECK
+# ==============================================================================
+
+def knowledge_has_device(
+    knowledge_context: str,
+    device: Optional[str],
+) -> bool:
+    if not device:
+        return bool(knowledge_context.strip())
+
+    return normalize_text(device) in normalize_text(
+        knowledge_context
+    )
+
+
+def knowledge_contains_intent_info(
+    knowledge: str,
+    intent: Optional[str],
+    device: Optional[str],
+) -> bool:
+    """
+    Kiểm tra xem knowledge có chứa thông tin liên quan đến intent không.
+    Nếu không có, không nên gọi LLM.
+    """
+    if not knowledge.strip():
+        return False
+
+    if not intent:
+        # Nếu không có intent, cứ cho phép LLM trả lời dựa trên knowledge.
+        return True
+
+    # Chuẩn hóa knowledge để tìm kiếm
+    knowledge_lower = knowledge.lower()
+
+    if intent == "driver":
+        keywords = ["driver", "tải", "download", "link", ".exe", ".dmg", "cài đặt", "install"]
+        # Nếu có device, kiểm tra tên device trong knowledge
+        if device:
+            device_norm = normalize_text(device)
+            if device_norm not in normalize_text(knowledge):
+                return False  # Knowledge không liên quan đến thiết bị này
+        # Kiểm tra có từ khoá driver không
+        if any(kw in knowledge_lower for kw in keywords):
+            return True
+        else:
+            return False
+
+    elif intent == "mobile":
+        keywords = ["điện thoại", "pos", "xtest", "lan", "ip", "android", "iphone", "kết nối", "wifi"]
+        if any(kw in knowledge_lower for kw in keywords):
+            return True
+        return False
+
+    elif intent == "troubleshoot":
+        keywords = ["lỗi", "không in", "giấy trắng", "không cắt", "kẹt", "đèn đỏ", "nghẽn mạng", "không kết nối"]
+        if any(kw in knowledge_lower for kw in keywords):
+            return True
+        return False
+
+    elif intent == "info":
+        keywords = ["thông số", "model", "usb", "bluetooth", "kích thước", "công suất"]
+        if any(kw in knowledge_lower for kw in keywords):
+            return True
+        return False
+
+    # Mặc định cho phép
+    return True
+
+
+def build_no_data_response(
+    device: Optional[str],
+    intent: Optional[str],
+) -> str:
+    if device and intent == "driver":
+        return (
+            f"Dạ em đã nhận thiết bị **{device}**, nhưng kho dữ liệu hiện chưa có hướng dẫn cài driver hoặc link tải cho model này.\n\n"
+            "Anh/chị vui lòng kiểm tra lại tên model (có thể sai chính tả) hoặc gửi ảnh tem/model máy in để em xác định chính xác hơn. "
+            "Nếu cần gấp, anh/chị có thể liên hệ bộ phận kỹ thuật Sapo qua hotline 1900 6750."
+        )
+
+    if device and intent == "mobile":
+        return (
+            f"Dạ em đã nhận thiết bị **{device}**, nhưng kho dữ liệu chưa có hướng dẫn cài đặt qua điện thoại/POS/LAN cho model này.\n\n"
+            "Anh/chị kiểm tra lại model và cho em biết thêm chi tiết lỗi cụ thể nhé."
+        )
+
+    if device and intent == "troubleshoot":
+        return (
+            f"Dạ em đã nhận thiết bị **{device}**, nhưng kho dữ liệu chưa có thông tin khắc phục lỗi này.\n\n"
+            "Anh/chị mô tả thêm hiện tượng (đèn báo, lỗi trên màn hình, v.v.) để em tìm đúng hướng xử lý ạ."
+        )
+
+    if device:
+        return (
+            f"Dạ em đã nhận thiết bị **{device}**, nhưng kho dữ liệu hiện chưa có thông tin phù hợp.\n\n"
+            "Anh/chị vui lòng kiểm tra lại model hoặc gửi ảnh tem máy để em tra cứu chính xác hơn."
+        )
+
+    return (
+        "Dạ hiện em chưa xác định được thiết bị hoặc dữ liệu phù hợp.\n\n"
+        "Anh/chị cho em xin **tên model máy** (ví dụ: SPRO2, K200L...) và mô tả nhu cầu/lỗi cụ thể giúp em nhé."
+    )
 
 
 # ==============================================================================
@@ -1080,49 +1159,6 @@ def sanitize_response_content(
 
 
 # ==============================================================================
-# KNOWLEDGE QUALITY CHECK
-# ==============================================================================
-
-def knowledge_has_device(
-    knowledge_context: str,
-    device: Optional[str],
-) -> bool:
-    if not device:
-        return bool(knowledge_context.strip())
-
-    return normalize_text(device) in normalize_text(
-        knowledge_context
-    )
-
-
-def build_no_data_response(
-    device: Optional[str],
-    intent: Optional[str],
-) -> str:
-    if device and intent == "driver":
-        return (
-            f"Dạ em đã nhận thiết bị **{device}**, "
-            "nhưng hiện trong Kho dữ liệu chưa có đủ thông tin Driver "
-            "để em gửi chính xác.\n\n"
-            "Anh/chị vui lòng kiểm tra lại model hoặc gửi ảnh tem/model "
-            "máy in, em sẽ khoanh đúng thiết bị trước ạ."
-        )
-
-    if device:
-        return (
-            f"Dạ em đã nhận thiết bị **{device}**, "
-            "nhưng Kho dữ liệu hiện chưa có thông tin phù hợp với yêu cầu này.\n\n"
-            "Anh/chị mô tả thêm lỗi hoặc nhu cầu cụ thể giúp em nhé ạ."
-        )
-
-    return (
-        "Dạ hiện em chưa xác định được đúng thiết bị hoặc dữ liệu phù hợp.\n\n"
-        "Anh/chị cho em xin **tên model máy** "
-        "(ví dụ: SPR02, K200L...) và mô tả nhu cầu/lỗi giúp em nhé ạ."
-    )
-
-
-# ==============================================================================
 # SYSTEM PROMPT
 # ==============================================================================
 
@@ -1165,7 +1201,8 @@ QUY TẮC QUAN TRỌNG NHẤT:
 12. Không dùng tiêu đề Markdown bằng #.
 13. Không hướng dẫn Control Panel / Add a local printer / Devices and Printers,
     trừ khi chính KHO DỮ LIỆU có một quy trình bắt buộc như vậy.
-14. Nếu người dùng đã có model trong ngữ cảnh thì không hỏi lại model một lần nữa.
+14. **TUYỆT ĐỐI KHÔNG HỎI LẠI MODEL NẾU THIẾT BỊ ĐÃ ĐƯỢC XÁC ĐỊNH.** 
+    Nếu thiếu thông tin, hãy nói rằng chưa có dữ liệu và yêu cầu người dùng cung cấp thêm mô tả lỗi hoặc liên hệ hỗ trợ.
 15. Nếu câu hỏi là cài Driver, ưu tiên đưa đúng Driver có trong kho
     và nền tảng Windows/macOS nếu dữ liệu có.
 16. Nếu câu hỏi là lỗi, tập trung đúng lỗi người dùng mô tả,
@@ -1410,13 +1447,8 @@ def get_web_history(messages: list) -> List[Dict[str, str]]:
 def wrap_gsuite_addon_response(text_message: str) -> dict:
     clean_text = sanitize_response_content(text_message)
 
-    # Google Chat không cần Markdown link [text](url) theo format này.
-    clean_text = re.sub(
-        r"\[([^\]]+)\]\((https?://[^)]+)\)",
-        r"\1: \2",
-        clean_text,
-    )
-
+    # Google Chat hiển thị Markdown link, nên giữ nguyên
+    # Không chuyển đổi [text](url) thành text: url
     return {
         "hostAppDataAction": {
             "chatDataAction": {
@@ -1449,7 +1481,8 @@ async def process_message(
     4. nhận diện menu 1/2/3
     5. nhận diện intent
     6. retrieval đúng thiết bị
-    7. LLM chỉ diễn đạt dựa trên dữ liệu
+    7. kiểm tra knowledge có liên quan intent không
+    8. LLM chỉ diễn đạt dựa trên dữ liệu (hoặc trả no-data)
     """
 
     message = clean_google_chat_text(message)
@@ -1494,7 +1527,7 @@ async def process_message(
             answer = (
                 "Dạ em chưa biết anh/chị đang chọn cho thiết bị nào ạ.\n\n"
                 "Anh/chị gửi giúp em tên model máy trước "
-                "(ví dụ: SPR02, K200L...) nhé."
+                "(ví dụ: SPRO2, K200L...) nhé."
             )
 
             return answer, session
@@ -1542,7 +1575,7 @@ async def process_message(
             # Nếu user đang hỏi rất chung chung, không gọi AI bừa.
             return (
                 "Dạ anh/chị cho em xin **tên model thiết bị** "
-                "(ví dụ: SPR02, K200L...) để em tra đúng dữ liệu nhé ạ.",
+                "(ví dụ: SPRO2, K200L...) để em tra đúng dữ liệu nhé ạ.",
                 session,
             )
 
@@ -1564,14 +1597,18 @@ async def process_message(
     )
 
     # --------------------------------------------------------------------------
-    # Nếu không có dữ liệu -> không gọi LLM để tránh hallucination.
+    # Kiểm tra knowledge có đáp ứng intent không.
+    # Nếu không, trả no-data (không gọi LLM).
     # --------------------------------------------------------------------------
-    if not knowledge.strip():
+    if not knowledge.strip() or not knowledge_contains_intent_info(
+        knowledge,
+        session.get("intent"),
+        cached_device
+    ):
         answer = build_no_data_response(
             device=cached_device,
             intent=session.get("intent"),
         )
-
         return answer, session
 
     # --------------------------------------------------------------------------
@@ -1612,7 +1649,8 @@ async def process_message(
         f"Ý định đã xác định: {session.get('intent') or 'chưa xác định'}\n"
         f"Câu hỏi hiện tại: {message}\n"
         f"{history_text}\n\n"
-        "Hãy trả lời trực tiếp câu hỏi hiện tại dựa trên KHO DỮ LIỆU."
+        "Hãy trả lời trực tiếp câu hỏi hiện tại dựa trên KHO DỮ LIỆU. "
+        "KHÔNG HỎI LẠI MODEL VÌ ĐÃ CÓ THIẾT BỊ."
     )
 
     answer = await call_llm_single(
