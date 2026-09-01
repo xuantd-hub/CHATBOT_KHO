@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Device Classification Engine", version="1700.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Full Unified Engine", version="1900.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,8 +100,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "1700.0", 
-        "engine": "Device Classification Engine",
+        "version": "1900.0", 
+        "engine": "Full Unified Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -190,25 +190,28 @@ def extract_device_info_from_history(messages: list) -> tuple:
     return detected_model, detected_category
 
 # ------------------------------------------------------------------------------
-# TRÍCH XUẤT DỮ LIỆU RAG VỚI BỘ LỌC PHÂN LOẠI MÁY BẮT BUỘC
+# TRÍCH XUẤT DỮ LIỆU RAG VỚI LỊCH SỬ GỘP TOÀN BỘ CÂU HỎI CỦA KHÁCH
 # ------------------------------------------------------------------------------
 def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     
+    # Gộp toàn bộ câu hỏi của khách trong phiên chat để duy trì từ khóa sự cố
+    user_texts = [m.get("text", "") for m in messages_list if m.get("role") in ["user", "Khach_Hang"]]
+    combined_user_text = " ".join(user_texts).lower()
+    
     latest_msg = messages_list[-1]["text"] if messages_list else ""
     latest_lower = latest_msg.lower()
-    
+
     detected_model, detected_category = extract_device_info_from_history(messages_list)
     has_device_info = bool(detected_model or detected_category)
 
-    # Nhận diện Ý định
+    # Nhận diện Ý định dựa trên tin nhắn MỚI NHẤT và TOÀN BỘ phiên chat
     is_setup_intent = any(k in latest_lower for k in ["cài", "driver", "xtest", "app", "điện thoại", "máy tính", "kết nối", "lan", "ip", "setup"])
-    is_error_intent = any(k in latest_lower for k in ["lỗi", "không", "kẹt", "hư", "trắng", "mực", "cắt", "sự cố", "sửa"])
-    is_policy_intent = any(k in latest_lower for k in ["bảo hành", "đổi trả", "chính sách", "thu hồi"])
+    is_error_intent = any(k in combined_user_text for k in ["lỗi", "không", "kẹt", "hư", "trắng", "mực", "cắt", "sự cố", "sửa", "ra mực", "không ra"])
+    is_policy_intent = any(k in combined_user_text for k in ["bảo hành", "đổi trả", "chính sách", "thu hồi"])
 
-    search_phrase = f"{detected_model} {detected_category} {latest_lower}".strip()
     stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "thế", "nào", "bao", "nhiêu", "thông", "số", "qua", "đã", "ok", "rồi", "nhưng", "lại", "muốn"}
-    words = [w for w in search_phrase.split() if len(w) > 1 and w not in stop_words]
+    words = [w for w in combined_user_text.split() if len(w) > 1 and w not in stop_words]
 
     scored_rows = []
     for tab in accessible_tabs:
@@ -228,7 +231,7 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
             
             for w in words:
                 if w in row_text:
-                    score += 20
+                    score += 25
             
             if score > 0:
                 scored_rows.append((score, tab, row))
@@ -246,7 +249,7 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     return knowledge_text, has_device_info
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT ÉP HỎI PHÂN LOẠI MÁY NẾU CHƯA CÓ THÔNG TIN DEVICE
+# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG & BÁM SÁT 100% SHEET
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str, has_device_info: bool) -> str:
     return f"""
@@ -266,16 +269,18 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
       
       Anh/chị cho em xin tên model cụ thể ghi trên máy để em gửi hướng dẫn chuẩn 100% cho mình nhé!"
 
-2. TRƯỜNG HỢP 2: KHI ĐÃ CÓ TÊN MODEL MÁY HOẶC ĐÃ NÓI RÕ LOẠI MÁY IN (`HAS_DEVICE_INFO: True`):
-   - Trả lời TRỰC DIỆN từng bước khắc phục/cài đặt tương ứng với đúng loại máy và model đó có trong Kho dữ liệu bên dưới.
+2. 🛑 TRƯỜNG HỢP 2: KHI ĐÃ CÓ TÊN MODEL MÁY HOẶC ĐÃ NÓI RÕ LOẠI MÁY IN (`HAS_DEVICE_INFO: True`):
+   - **BÁM SÁT 100% NỘI DUNG SHEET:** BẮT BUỘC phải trích xuất chính xác từng câu, từng bước và link ảnh có trong cột `Cach_Khac_Phuc` của Dữ liệu bên dưới.
+   - **TUYỆT ĐỐI CẤM TỰ BỊA KIẾN THỨC BÊN NGOÀI:** Không tự giải thích lý thuyết in nhiệt, đảo cuộn giấy hay nói về giấy tem nếu trong dữ liệu gốc của dòng đó không yêu cầu!
 
 👉 🛑 QUY TẮC ĐÍNH KÈM LINK TỪNG BƯỚC (INLINE STEP-LINK RULE):
    - Nếu ở MỖI BƯỚC CÓ ĐÍNH KÈM LINK ẢNH / LINK VIDEO RIÊNG:
-     -> AI BẮT BUỘC phải đặt link ảnh/video đó NGAY DƯỚI BƯỚC TƯƠNG ỨNG.
+     -> AI BẮT BUỘC phải đặt link ảnh/video đó NGAY DƯỚI BƯỚC TƯƠNG ỨNG!
      -> TUYỆT ĐỐI KHÔNG GỘM NGUYÊN ĐỐNG LINK VỀ CUỐI BÀI!
 
 🧠 QUY TẮC DUY TRÌ BỐI CẢNH (Context Memory):
    - Khi người dùng đã cung cấp tên model (VD: SPR02 hay SPL01) ở các câu trước -> BẮT BUỘC phải giữ nguyên bối cảnh model đó cho toàn bộ các câu hỏi phía sau.
+   - Khi chuyển từ Sửa lỗi sang Cài đặt (hoặc ngược lại) -> Giữ nguyên model và dẫn dắt tự nhiên bằng 1 câu ngắn ở đầu bài trước khi xuất hướng dẫn.
 
 🛑 LUẬT THÉP ĐỊNH DẠNG:
 - TUYỆT ĐỐI CẤM sử dụng mã LaTeX toán học (như $\\rightarrow$, $\\Rightarrow$). Dùng dấu mũi tên "➔" hoặc "->".
@@ -304,7 +309,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         payload = {
             "model": CEREBRAS_MODEL,
             "messages": messages_payload,
-            "temperature": 0.4,
+            "temperature": 0.3,
             "top_p": 0.9,
             "max_tokens": 2000
         }
@@ -330,7 +335,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         payload = {
             "systemInstruction": {"parts": [{"text": system_instruction}]},
             "contents": gemini_contents,
-            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2000}
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2000}
         }
         try:
             res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
