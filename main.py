@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Gemma-Cerebras Engine", version="1000.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Rate-Limit Safe Engine", version="1100.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH BIẾN MÔI TRƯỜNG & LƯU BỘ NHỚ RAM
+# CẤU HÌNH BIẾN MÔI TRƯỜNG & RAM CACHE
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "").strip()
@@ -45,7 +45,7 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO CLIENT & ƯU TIÊN MODEL GEMMA 4 TRÊN CEREBRAS
+# KHỞI TẠO HTTP CLIENT
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
@@ -70,7 +70,6 @@ async def discover_active_cerebras_models():
         if res.status_code == 200:
             model_ids = [m["id"] for m in res.json().get("data", [])]
             AVAILABLE_CEREBRAS_MODELS = model_ids
-            # Ưu tiên các dòng Gemma 4 / Gemma 31B trước
             gemma_prefs = ["gemma-4-31b", "gemma-4-31b-it", "google/gemma-4-31b-it", "gemma-31b-it", "llama-3.3-70b"]
             for pref in gemma_prefs:
                 if pref in model_ids:
@@ -101,11 +100,12 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "1000.0", 
-        "engine": "Gemma-Cerebras Dedicated",
+        "version": "1100.0", 
+        "engine": "Cerebras Rate-Limit Safe",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
-        "has_cerebras_key": bool(CEREBRAS_API_KEY)
+        "has_cerebras_key": bool(CEREBRAS_API_KEY),
+        "has_gemini_key": bool(GEMINI_API_KEY)
     }
 
 @app.get("/reload")
@@ -117,7 +117,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# LÀM SẠCH VĂN BẢN VÀ LỌC CÂU HỎI
+# LÀM SẠCH VĂN BẢN (KHỬ MÃ LATEX MŨI TÊN $\rightarrow$)
 # ------------------------------------------------------------------------------
 def clean_thinking_process(text: str) -> str:
     if "Here's a thinking process:" in text:
@@ -126,7 +126,7 @@ def clean_thinking_process(text: str) -> str:
     text = re.sub(r'#{1,6}\s*', '', text)
     text = re.sub(r'---+', '', text)
     
-    # 🎯 XỬ LÝ LỖI DÍNH MÃ LATEX MŨI TÊN
+    # 🎯 KHỬ SẠCH MÃ LATEX MŨI TÊN DÍNH CÂU
     text = re.sub(r'\$\\rightarrow\$|\\rightarrow|\$\\Rightarrow\$|\\Rightarrow', '➔', text)
     
     return text.strip()
@@ -163,7 +163,7 @@ def extract_user_text(event: dict) -> str:
     return deep_search(event)
 
 # ------------------------------------------------------------------------------
-# THUẬT TOÁN LỌC DỮ LIỆU TỔNG QUÁT THEO DANH MỤC (RAG MULTI-TAB)
+# TRÍCH XUẤT DỮ LIỆU RAG MULTI-TAB
 # ------------------------------------------------------------------------------
 def get_high_precision_knowledge(query: str, role: str) -> str:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
@@ -204,17 +204,12 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
     return knowledge_text
 
 # ------------------------------------------------------------------------------
-# PROMPT HỆ THỐNG ĐỢỢC TỐI ƯU CHO GEMMA 4 (TƯ DUY PHÂN TÍCH CHAIN-OF-THOUGHT)
+# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
 Bạn là **Trợ Lý KHO Sapo** – Trợ lý AI cao cấp, có tư duy logic sâu sắc và am hiểu kỹ thuật thiết bị Sapo.
 Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghiệp, hành văn tự nhiên, rõ ràng.
-
-🧠 QUY TRÌNH PHÂN TÍCH TƯ DUY (HÃY BÁM SÁT TRƯỚC KHI XUẤT CÂU TRẢ LỜI):
-- Bước 1: Kiểm tra xem câu hỏi của người dùng có bị mập mờ hoặc chỉ chứa tên thiết bị/chính sách chung chung (VD: "spr02", "bảo hành") hay không.
-- Bước 2: Kiểm tra môi trường đang hỏi (Điện thoại hay Máy tính). Tuyệt đối cấm nhầm lẫn link/ảnh của Máy tính (Windows Properties) dán vào bài viết Điện thoại (XTEST).
-- Bước 3: Chỉ trích xuất đường link CÓ THỰC trong Dữ liệu bên dưới.
 
 🎯 QUY TẮC PHẢN HỒI (TUÂN THỦ 100%):
 
@@ -238,10 +233,10 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
    - Đang hỏi CÀI TRÊN MÁY TÍNH ➔ CHỈ đính kèm link Driver Win/Mac & video thao tác PC.
    - Đang hỏi SỬA LỖI / CHÍNH SÁCH ➔ Trích xuất đúng thông tin trong Kho dữ liệu.
 
-3. LUẬT THÉP CẤM BỊA ĐẶT:
+3. LUẬT THÉP ĐỊNH DẠNG:
+- TUYỆT ĐỐI CẤM sử dụng mã LaTeX toán học (như $\\rightarrow$, $\\Rightarrow$). Dùng dấu mũi tên "➔" hoặc "->".
 - Không tự bịa bước Control Panel hay thao tác phần cứng nếu dữ liệu không có.
 - Không tự bịa link URL giả.
-- TUYỆT ĐỐI KHÔNG dùng mã LaTeX toán học (như $\rightarrow$, $\Rightarrow$). Chỉ dùng ký tự mũi tên thông thường như "➔" hoặc "->".
 
 ---
 
@@ -250,7 +245,7 @@ KHO DỮ LIỆU GỐC SAPO:
 """
 
 # ------------------------------------------------------------------------------
-# GỌI CEREBRAS CỚ CẤU HÌNH PARAMETERS CHUẨN (TEMP 0.6, TOP_P 0.9)
+# HÀM GỌI CEREBRAS LLM VỚI BỘ LỌC CẮT LỖI 429 VÀ CHUYỂN GEMINI
 # ------------------------------------------------------------------------------
 async def call_llm_with_history(system_instruction: str, messages_list: list) -> str:
     messages_payload = [{"role": "system", "content": system_instruction}]
@@ -258,15 +253,15 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         role_type = "user" if m.get("role") in ["user", "Khach_Hang"] else "assistant"
         messages_payload.append({"role": role_type, "content": m.get("text", "")})
 
-    # 1. GỌI CEREBRAS API DEDICATED VỚI MODEL GEMMA 4 31B
+    # 1. GỌI CEREBRAS API DEDICATED
     if CEREBRAS_API_KEY and CEREBRAS_MODEL:
         url = "https://api.cerebras.ai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"}
         payload = {
             "model": CEREBRAS_MODEL,
             "messages": messages_payload,
-            "temperature": 0.6,   # Tăng temp lên 0.6 giúp Gemma hành văn mượt và thông minh hơn
-            "top_p": 0.9,         # Top_p 0.9 mở rộng tư duy ngôn ngữ
+            "temperature": 0.6,
+            "top_p": 0.9,
             "max_tokens": 2000
         }
         try:
@@ -274,9 +269,12 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
             if res.status_code == 200:
                 data = res.json()
                 return clean_thinking_process(data["choices"][0]["message"]["content"])
-        except Exception: pass
+            else:
+                print(f"⚠️ Cerebras trả về status {res.status_code}: {res.text}")
+        except Exception as e:
+            print(f"⚠️ Cerebras exception: {str(e)}")
 
-    # 2. DỰ PHÒNG GEMINI NẾU CEREBRAS MẤT MẠNG TẠM THỜI
+    # 2. DỰ PHÒNG GEMINI NẾU CEREBRAS BỊ 429 HOẶC LỖI MẠNG
     if GEMINI_API_KEY:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
@@ -298,7 +296,8 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
                 return clean_thinking_process(raw_text)
         except Exception: pass
 
-    return "👋 Dạ em chào anh/chị! Em là **Trợ Lý KHO Sapo**. Anh/chị cần em hỗ trợ cài đặt hay tra cứu thiết bị nào ạ?"
+    # 🎯 THÔNG BÁO BẬN/QUÁ TẢI (KHÔNG CÒN TRẢ LỜI BẰNG CÂU CHÀO MẶC ĐỊNH)
+    return "⚠️ Hệ thống AI hiện đang quá tải lượt truy cập (Lỗi 429). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
 
 def wrap_gsuite_addon_response(text_message: str) -> dict:
     clean_text = clean_thinking_process(text_message)
@@ -381,4 +380,4 @@ async def google_chat_webhook(request: Request):
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
     except Exception:
-        return JSONResponse(content=wrap_gsuite_addon_response("👋 Dạ em chào anh/chị! Em là Trợ Lý KHO Sapo. Anh/chị cần em hỗ trợ cài đặt hay tra cứu thiết bị nào ạ?"))
+        return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"))
