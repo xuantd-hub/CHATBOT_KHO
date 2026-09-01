@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Master Engine", version="200.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Master Engine", version="200.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -235,13 +235,14 @@ Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên k
 ### KỊCH BẢN B: XỬ LÝ SỰ CỐ / BÁO LỖI KỸ THUẬT / CẦN CÀI ĐẶT CỤ THỂ
 *(Ví dụ: "in ra giấy trắng", "cài spr02 qua điện thoại", "driver spr02")*
 - **HÀNH ĐỘNG:** Trả lời trực diện giải pháp cho thiết bị đang đề cập. Đưa ra quy trình từng bước rõ ràng và đính kèm ĐẦY ĐỦ link Driver/Tài liệu tương ứng từ Kho dữ liệu bên dưới.
+- các bước cài đặt theo chuẩn IT nhưng dựa theo cài đặt trên driver, chứ không hướng dẫn theo kiểu add máy in thủ công 
 
 ### KỊCH BẢN C: THIẾU THÔNG TIN THIẾT BỊ (ĐIỀN KHUYẾT THÔNG MINH)
 *(Ví dụ: "cài máy in hóa đơn", "in tem bị chệch")*
 - **HÀNH ĐỘNG:** 
   - Nếu trong các tin nhắn trước người dùng ĐÃ NÓI tên thiết bị: Dùng ngay tên thiết bị đó để xử lý theo Kịch bản B, TUYỆT ĐỐI KHÔNG HỎI LAI.
   - Nếu người dùng CHƯA NÓI tên thiết bị: Đưa ngay quy trình xử lý chuẩn IT chung (VD: hướng dẫn vào Control Panel > Devices and Printers) 💬 **ĐỒNG THỜI** kết bài bằng lời hỏi khéo: *"Anh/chị cho em xin tên model máy (VD: SPR02, SPL01...) để em gửi chính xác link Driver và video thao tác nhé ạ!"*
-
+  
 ### KỊCH BẢN D: THIẾU DỮ LIỆU HOẶC MÁY NGOÀI DANH MỤC
 - **HÀNH ĐỘNG:** Đưa ra hướng xử lý IT căn bản và gợi ý liên hệ tổng đài Sapo.
 
