@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Auto-Discovery Engine", version="250.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Fixed Llama Engine", version="255.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,7 +24,7 @@ app.add_middleware(
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "csk-xyrjt5mej95fexmh9f9w2yprrt4wttjyrfy9pv9hc2jjv66d").strip()
-CEREBRAS_MODEL = "gemma-4-31b"
+CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "llama3.1-8b").strip()
 AVAILABLE_CEREBRAS_MODELS = []
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
@@ -44,7 +44,7 @@ ALL_TABS = TABS_PUBLIC + [TAB_PRIVATE]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO HTTP CLIENT & DÒ TÌM MODEL CEREBRAS THỰC TẾ
+# KHỞI TẠO HTTP CLIENT & DÒ TÌM MODEL UƯ TIÊN LLAMA
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
@@ -62,7 +62,7 @@ async def shutdown_event():
         await HTTP_CLIENT.aclose()
 
 async def discover_active_cerebras_models():
-    """ Tự động lấy danh sách model thực tế từ tài khoản Cerebras của anh """
+    """ Tự động kiểm tra danh sách model và giữ đúng model Llama do người dùng chỉ định """
     global CEREBRAS_MODEL, AVAILABLE_CEREBRAS_MODELS
     if not CEREBRAS_API_KEY:
         return
@@ -76,11 +76,15 @@ async def discover_active_cerebras_models():
             model_ids = [m["id"] for m in models_data]
             AVAILABLE_CEREBRAS_MODELS = model_ids
             
-            # Ưu tiên các model Cerebras thực tế có sẵn
-            if model_ids:
-                CEREBRAS_MODEL = model_ids[0]
+            env_target = os.getenv("CEREBRAS_MODEL", "llama3.1-8b").strip()
+            
+            # Khóa ưu tiên model Llama người dùng yêu cầu
+            if env_target in model_ids:
+                CEREBRAS_MODEL = env_target
+            else:
+                # Nếu không thấy đúng tên, ưu tiên tìm model có chữ llama
                 for m_id in model_ids:
-                    if "llama" in m_id.lower() or "gemma" in m_id.lower() or "gpt" in m_id.lower():
+                    if "llama" in m_id.lower():
                         CEREBRAS_MODEL = m_id
                         break
     except Exception:
@@ -112,7 +116,7 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "250.0",
+        "version": "255.0",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "backup_gemini_model": GEMINI_MODEL
@@ -260,6 +264,7 @@ Khi nhận câu hỏi, bạn phải tự động kích hoạt bộ lọc liên k
 
 # KHO DỮ LIỆU GỐC SAPO
 {knowledge_context}
+
 """
 
 # ------------------------------------------------------------------------------
@@ -349,7 +354,7 @@ async def chat_stream(req: ChatRequest):
     async def generate_response_stream():
         has_yielded = False
         
-        # 1. CEREBRAS STREAMING VỚI MODEL ĐỘNG DÒ TÌM ĐƯỢC
+        # 1. CEREBRAS STREAMING CỐ ĐỊNH CHUẨN MODEL LLAMA3.1-8B
         if CEREBRAS_API_KEY and CEREBRAS_MODEL:
             messages_payload = [{"role": "system", "content": system_instruction}]
             trimmed = req.messages[-5:] if len(req.messages) > 5 else req.messages
@@ -386,7 +391,7 @@ async def chat_stream(req: ChatRequest):
                             return
             except Exception: pass
 
-        # 2. CHUYỂN SANG GEMINI DỰ PHÒNG NẾU CEREBRAS BẬN (TIMEOUT RÚT NGẮN 2.5S)
+        # 2. CHUYỂN SANG GEMINI DỰ PHÒNG NẾU CEREBRAS BẬN
         if not has_yielded:
             fallback_ans = await call_gemini_api(system_instruction, combined_query)
             yield fallback_ans
