@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Ultimate Perfect Engine", version="1300.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Intelligent Context Engine", version="1400.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,8 +100,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "1300.0", 
-        "engine": "Ultimate Perfect Engine",
+        "version": "1400.0", 
+        "engine": "Intelligent Context Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -204,7 +204,7 @@ def get_high_precision_knowledge(query: str, role: str) -> str:
     return knowledge_text
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG & ÉP DÙNG LINK TỪNG BƯỚC (INLINE)
+# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG & BỘ QUY TẮC CỦA ANH
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str) -> str:
     return f"""
@@ -240,20 +240,21 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
         3. **Thay thử giấy:** Đổi sang cuộn giấy mới nếu 2 cách trên không được.
    - TUYỆT ĐỐI KHÔNG GỘM NGUYÊN ĐỐNG LINK VỀ CUỐI BÀI!
    - TUYỆT ĐỐI KHÔNG BỎ SÓT BẤT KỲ LINK NÀO CÓ TRONG DỮ LIỆU GỐC!
+
 🧠 QUY TẮC DUY TRÌ BỐI CẢNH & TRA CỨU DỮ LIỆU (BẮT BUỘC):
+   1. GHI NHỚ BỐI CẢNH (Context Memory):
+      - Khi người dùng hỏi tiếp trong cuộc trò chuyện (ví dụ: "nhưng in không cắt giấy", "còn lỗi này thì sao"), BẮT BUỘC phải giữ nguyên loại thiết bị/model đang thảo luận ở các câu trước (Ví dụ: Máy in hóa đơn K200L, SPR01, SPR02...). 
+      - TUYỆT ĐỐI KHÔNG hỏi lại model máy nếu ở câu trước người dùng hoặc AI đã xác định loại thiết bị đó rồi.
 
-        1. GHI NHỚ BỐI CẢNH (Context Memory):
-           - Khi người dùng hỏi tiếp trong cuộc trò chuyện (ví dụ: "nhưng in không cắt giấy", "còn lỗi này thì sao"), BẮT BUỘC phải giữ nguyên loại thiết bị/model đang thảo luận ở các câu trước (Ví dụ: Máy in hóa đơn K200L, SPR01, SPR02...). 
-           - TUYỆT ĐỐI KHÔNG hỏi lại model máy nếu ở câu trước người dùng hoặc AI đã xác định loại thiết bị đó rồi.
+   2. TÁCH TỪ KHÓA CHÍNH (Intent Extraction):
+      - Người dùng thường nói câu dài chứa văn cảnh (ví dụ: "mình lấy giấy bị che rồi, nhưng in không cắt giấy").
+      - AI phải tự lọc ra từ khóa sự cố chính: "in không cắt giấy" / "không cắt giấy" / "kẹt dao cắt".
+      - Tiến hành đối chiếu từ khóa này với cột `Tu_Khoa_Nhan_Dien` và `Trieu_Chung_Thuc_Te` trong Kho dữ liệu để lấy ngay giải pháp `Cach_Khac_Phuc`.
 
-        2. TÁCH TỪ KHÓA CHÍNH (Intent Extraction):
-           - Người dùng thường nói câu dài chứa văn cảnh (ví dụ: "mình lấy giấy bị che rồi, nhưng in không cắt giấy").
-           - AI phải tự lọc ra từ khóa sự cố chính: "in không cắt giấy" / "không cắt giấy" / "kẹt dao cắt".
-           - Tiến hành đối chiếu từ khóa này với cột `Tu_Khoa_Nhan_Dien` và `Trieu_Chung_Thuc_Te` trong Kho dữ liệu để lấy ngay giải pháp `Cach_Khac_Phuc`.
+   3. NẾU TÌM THẤY DỮ LIỆU CÓ CHỨA TỪ KHÓA:
+      - Trả lời ngay hướng dẫn khắc phục, tuyệt đối KHÔNG báo "không có thông tin".
 
-        3. NẾU TÌM THẤY DỮ LIỆU CÓ CHỨA TỪ KHÓA:
-           - Trả lời ngay hướng dẫn khắc phục, tuyệt đối KHÔNG báo "không có thông tin".
-🛑. LUẬT THÉP ĐỊNH DẠNG:
+🛑 LUẬT THÉP ĐỊNH DẠNG:
 - TUYỆT ĐỐI CẤM sử dụng mã LaTeX toán học (như $\\rightarrow$, $\\Rightarrow$). Dùng dấu mũi tên "➔" hoặc "->".
 - Không tự bịa bước Control Panel hay thao tác phần cứng nếu dữ liệu không có.
 - Chỉ cung cấp đường link có thực trong Kho dữ liệu dưới đây.
@@ -294,7 +295,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         except Exception as e:
             print(f"⚠️ Cerebras Exception: {str(e)}")
 
-    # 2. DỰ PHÒNG CHUYỂN SANG GEMINI NẾU CEREBRAS NGHẼN/BẬN
+    # 2. DỰ PHÒNG CHUYỂN SANG GEMINI NẾU CEREBRAS NGHỄN/BẬN
     if GEMINI_API_KEY:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
@@ -319,7 +320,6 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         except Exception as e:
             print(f"⚠️ Gemini Exception: {str(e)}")
 
-    # 🎯 THÔNG BÁO BẬN CHUẨN XÁC KHI NGHẼN MẠNG (KHÔNG TRẢ VỀ CÂU CHÀO MẶC ĐỊNH)
     return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
 
 def wrap_gsuite_addon_response(text_message: str) -> dict:
@@ -346,7 +346,6 @@ async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
     clean_q = re.sub(r'[^\w\s]', '', latest_msg.lower()).strip()
     
-    # Chỉ bắt chào khi câu gõ DUY NHẤT chứa từ chào
     exact_quick_greetings = {"chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe", "xin chào"}
     if clean_q in exact_quick_greetings:
         async def greeting_gen():
@@ -381,7 +380,6 @@ async def google_chat_webhook(request: Request):
         if event_type == "ADDED_TO_SPACE":
             return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!"))
 
-        # Bắt chào chính xác (Không bắt bừa khi câu hỏi dài)
         exact_quick_greetings = {"chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe", "xin chào"}
         clean_user_q = re.sub(r'[^\w\s]', '', cleaned_message.lower()).strip()
         if not cleaned_message or clean_user_q in exact_quick_greetings:
@@ -406,5 +404,4 @@ async def google_chat_webhook(request: Request):
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
     except Exception:
-        # Nếu nổ lỗi hệ thống ngoài dự kiến, báo bận chứ KHÔNG trả về câu chào
         return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"))
