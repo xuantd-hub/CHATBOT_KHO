@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Intent Stacking Engine", version="3200.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Universal Precision Engine", version="3300.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,8 +100,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "3200.0", 
-        "engine": "Intent Stacking Engine",
+        "version": "3300.0", 
+        "engine": "Universal Precision Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -117,7 +117,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# LÀM SẠCH VĂN BẢN VÀ KHÔI PHỤC LINK NGUYÊN BẢN TỰ ĐỘNG
+# LÀM SẠCH VĂN BẢN VÀ KHÔI PHỤC LINK NGUYÊN BẢN TỰ ĐỘNG (TAB 1 + TAB 2)
 # ------------------------------------------------------------------------------
 def clean_thinking_process(text: str) -> str:
     if "Here's a thinking process:" in text:
@@ -130,8 +130,8 @@ def clean_thinking_process(text: str) -> str:
 
 def restore_exact_urls(text: str, top_matches: list) -> str:
     """
-    🛠️ BỘ LỌC TỰ CHỮA LỖI LINK NÂNG CẤP (STRONG LINK HEALING):
-    Ép đè 100% link thật từ Sheet vào bài viết, triệt hạ hoàn toàn link bịa/link rác 1S_...
+    🛠️ BỘ LỌC TỰ CHỮA LỖI LINK ĐỒNG BỘ TOÀN DẠNG (TAB 1 & TAB 2):
+    Ép đè 100% link thật từ Sheet (bao gồm link ảnh minh họa Tab 1 & link Driver Tab 2).
     """
     if not top_matches:
         return text
@@ -140,6 +140,7 @@ def restore_exact_urls(text: str, top_matches: list) -> str:
     mac_url = ""
     doc_url = ""
     video_url = ""
+    img_urls = []
 
     for score, tab, row in top_matches:
         for k, v in row.items():
@@ -148,22 +149,25 @@ def restore_exact_urls(text: str, top_matches: list) -> str:
                 key_lower = str(k).lower()
                 if "win" in key_lower: win_url = val_str
                 elif "mac" in key_lower: mac_url = val_str
-                elif "video" in key_lower: video_url = val_str
-                elif "noi_dung" in key_lower or "huong_dan" in key_lower: doc_url = val_str
+                elif "video" in key_lower or "hd" in key_lower: video_url = val_str
+                elif "anh" in key_lower or "img" in key_lower or "truc_tiep" in key_lower: img_urls.append(val_str)
+                elif "noi_dung" in key_lower or "huong_dan" in key_lower or "khac_phuc" in key_lower: doc_url = val_str
 
     url_pattern = re.compile(r'https?://[^\s\)\>\]]+')
     found_urls = url_pattern.findall(text)
 
     for found_url in found_urls:
         clean_found = found_url.rstrip('.,;')
-        if "1S_" in clean_found or "S-S-S" in clean_found or "Driver_Win" in clean_found or "Guide" in clean_found:
+        if "1S_" in clean_found or "S-S-S" in clean_found or "Driver_Win" in clean_found or "Guide" in clean_found or "link" in clean_found.lower():
             replacement = None
             if "Driver_Win" in clean_found or "win" in clean_found.lower():
                 replacement = win_url or doc_url
             elif "Driver_Mac" in clean_found or "mac" in clean_found.lower():
                 replacement = mac_url or doc_url
-            elif "Video" in clean_found or "youtube" in clean_found.lower():
+            elif "Video" in clean_found or "youtube" in clean_found.lower() or "hd" in clean_found.lower():
                 replacement = video_url
+            elif "anh" in clean_found.lower() or "img" in clean_found.lower():
+                replacement = img_urls[0] if img_urls else doc_url
             elif "Guide" in clean_found or "doc" in clean_found.lower():
                 replacement = doc_url or win_url
             
@@ -205,7 +209,7 @@ def extract_user_text(event: dict) -> str:
     return deep_search(event)
 
 # ------------------------------------------------------------------------------
-# QUÉT NGƯỢC LỊCH SỬ DỂ GIỮ THUỘC TÍNH BỀN VỮNG (MODEL & HỆ ĐIỀU HÀNH)
+# QUÉT NGƯỢC LỊCH SỬ GIỮ MODEL VÀ HỆ ĐIỀU HÀNH
 # ------------------------------------------------------------------------------
 def extract_device_info_from_history(messages: list) -> tuple:
     device_models = ["spr02", "spr01", "k200l", "k200u", "a868", "hprt", "80fe", "spl01", "xp350b", "g8", "a160m", "xprinter", "imin"]
@@ -247,7 +251,7 @@ def extract_platform_intent(messages: list) -> str:
     return ""
 
 # ------------------------------------------------------------------------------
-# CẤP ĐỘ 2 BỔ SUNG BẢO TỒN Ý ĐỊNH ĐA LƯỢT CHAT (INTENT STACKING)
+# LLM ROUTER BẢO TỒN Ý ĐỊNH DỰA TRÊN CHUỖI BỐI CẢNH (CONTEXT STACKING)
 # ------------------------------------------------------------------------------
 def extract_latest_action_intent_keywords(messages: list) -> str:
     for m in reversed(messages):
@@ -268,7 +272,6 @@ async def extract_latest_action_intent(messages: list) -> str:
     if not user_msgs:
         return ""
     
-    # 🎯 GỘP 3 CÂU GẦN NHẤT ĐỂ AI ROUTER KHÔNG BỊ MẤT Ý ĐỊNH KHI KHÁCH TRẢ LỜI TÊN MODEL
     combined_recent_text = " ".join(user_msgs[-3:]).strip()
 
     if HTTP_CLIENT and CEREBRAS_API_KEY and CEREBRAS_MODEL and combined_recent_text:
@@ -278,7 +281,7 @@ Hãy phân loại đoạn hội thoại sau của khách hàng vào DUY NHẤT 1
 - policy: Bảo hành, đổi trả, số tổng đài, hotline, sđt liên hệ, địa chỉ kho, lịch làm việc, thông tin liên hệ Sapo, quy định chung.
 - lan_setup: Cài đặt in qua mạng LAN, địa chỉ IP, kết nối Wifi, in qua App trên điện thoại/tablet (như xTest, Sapo App).
 - driver_setup: Tải driver, cài máy tính Windows, cài Mac/macOS.
-- error_fix: Báo lỗi thiết bị (không in được, kẹt giấy, in ra giấy trắng, không ra mực, kẹt dao cắt, hỏng hóc).
+- error_fix: Báo lỗi thiết bị (không in được, kẹt giấy, in ra giấy trắng, không ra mực, kẹt dao cắt, hỏng hóc, sửa chữa).
 - general: Chào hỏi hoặc câu hỏi chung.
 
 Chỉ trả về DUY NHẤT tên nhãn (không viết thêm giải thích).
@@ -307,7 +310,7 @@ Nhãn:"""
     return extract_latest_action_intent_keywords(messages)
 
 # ------------------------------------------------------------------------------
-# TRÍCH XUẤT DỮ LIỆU SONG LUỒNG (DUAL-CHANNEL RAG)
+# MA TRẬN ĐIỀU HƯỚNG TRÍCH XUẤT DỮ LIỆU CHÍNH XÁC (STRICT INTENT MATRIX)
 # ------------------------------------------------------------------------------
 async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
@@ -335,29 +338,47 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
                 if w in row_text:
                     score += 25
 
+            # ------------------------------------------------------------------
+            # MA TRẬN PHÂN CHIA ĐIỂM ƯU TIÊN THEO Ý ĐỊNH
+            # ------------------------------------------------------------------
             if tab in ["3_CHINH_SACH_SAPO", "4_DU_LIEU_NOI_BO"]:
                 score += 300  
                 if action_intent == "policy":
                     score += 1000
                 if score > 0:
                     policy_rows.append((score, tab, row))
-            else:
+
+            elif tab == "1_THIET_BI_VA_LOI":
                 if detected_model and detected_model in row_text:
                     score += 300
                 if detected_category and detected_category in row_text:
                     score += 150
+                # 🎯 KHI BÁO LỖI: TAB 1 ĐƯỢC CỘNG ĐIỂM TỰA NÚI CAO NHẤT (1000 ĐIỂM)
+                if action_intent == "error_fix":
+                    score += 1000
+                if score > 0:
+                    tech_rows.append((score, tab, row))
 
-                if tab == "2_HUONG_DAN_CAI_DAT":
-                    row_thao_tac = str(row.get("Loai_Thao_Tac", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower() + " " + str(row.get("Noi_Dung_Huong_Dan", "")).lower()
-                    if action_intent == "lan_setup" and any(k in row_thao_tac for k in ["lan", "ip", "mạng", "app", "xtest"]):
-                        score += 800
-                    elif platform_intent == "mac" and "mac" in row_thao_tac:
-                        score += 800
-                    elif platform_intent == "windows" and ("win" in row_thao_tac or "windows" in row_thao_tac):
-                        score += 800
+            elif tab == "2_HUONG_DAN_CAI_DAT":
+                if detected_model and detected_model in row_text:
+                    score += 300
+                if detected_category and detected_category in row_text:
+                    score += 150
+                # 🎯 KHI CÀI ĐẶT: TAB 2 MỚI ĐƯỢC CỘNG ĐIỂM ƯU TIÊN
+                row_thao_tac = str(row.get("Loai_Thao_Tac", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower() + " " + str(row.get("Noi_Dung_Huong_Dan", "")).lower()
+                if action_intent in ["lan_setup", "driver_setup"]:
+                    score += 1000
+                if platform_intent == "mac" and "mac" in row_thao_tac:
+                    score += 300
+                elif platform_intent == "windows" and ("win" in row_thao_tac or "windows" in row_thao_tac):
+                    score += 300
                 
                 if score > 0:
                     tech_rows.append((score, tab, row))
+
+            else:
+                if detected_model and detected_model in row_text: score += 300
+                if score > 0: tech_rows.append((score, tab, row))
 
     tech_rows.sort(key=lambda x: x[0], reverse=True)
     policy_rows.sort(key=lambda x: x[0], reverse=True)
@@ -366,7 +387,7 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     if action_intent == "policy":
         top_matches = policy_rows[:3] + tech_rows[:1]
     else:
-        top_matches = tech_rows[:2] + policy_rows[:2]
+        top_matches = tech_rows[:3] + policy_rows[:1]
 
     knowledge_text = f"HAS_DEVICE_INFO: {has_device_info}\nDETECTED_MODEL: {detected_model}\nDETECTED_CATEGORY: {detected_category}\nPLATFORM_INTENT: {platform_intent}\nACTION_INTENT: {action_intent}\n"
     for score, tab, row in top_matches:
@@ -378,7 +399,7 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     return knowledge_text, has_device_info, top_matches
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG NGUYÊN BẢN
+# SYSTEM PROMPT ĐỊNH HƯỚNG XỬ LÝ LỖI CHÍNH XÁC THEO TAB 1
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str, has_device_info: bool) -> str:
     return f"""
@@ -389,6 +410,11 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
 - **Sử dụng Icon/Emoji sinh động** ở đầu các tiêu đề và từng bước thao tác (VD: 💻, 🍏, 📱, 🛠️, 📌, ✅, 👉, 📄, 🎥, ⚠️, 📞).
 - **Chia nhỏ đoạn văn thoáng đãng**, dùng danh sách gạch đầu dòng (Bullet points).
 - **In đậm các từ khóa quan trọng**, tên nút bấm, tên bước (VD: **Bước 1: Tải Driver**, **Link Driver Mac:**).
+
+🛠️ QUY TẮC BẮT BUỘC KHI XỬ LÝ LỖI KỸ THUẬT (TAB 1_THIET_BI_VA_LOI):
+1. Khi dữ liệu thuộc Tab `1_THIET_BI_VA_LOI`, AI **BẮT BUỘC trích xuất CHÍNH XÁC NGUYÊN VĂN** nội dung hướng dẫn ở cột `Cach_Khac_Phuc`.
+2. Dán ĐẦY ĐỦ các đường link hình ảnh minh họa (`Link_Anh_Truc_Tiep`) và video hướng dẫn (`Link_Video_HD`) nếu có trong Sheet.
+3. TUYỆT ĐỐI KHÔNG tự trả lời lý thuyết chung chung mà bỏ qua các link hình ảnh minh họa thực tế có trong Kho dữ liệu!
 
 🛑 QUY TẮC ÉP TÁCH DÒNG ĐỘC LẬP CHO TẤT CẢ LINK (SEPARATED LINK RULE):
 - BẮT BUỘC mỗi đường link URL, hình ảnh hoặc video hướng dẫn phải nằm trên một dòng riêng biệt bắt đầu bằng dấu gạch đầu dòng (`- `).
@@ -428,7 +454,8 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
      - 📄 **Tài liệu / Bài viết hướng dẫn:** <Link trong Sheet>
      - 💻 **Link Tải Driver Windows:** <Link_Driver_Win trong Sheet>
      - 🍏 **Link Tải Driver Mac:** <Link_Driver_Mac trong Sheet>
-     - 🎥 **Video Hướng Dẫn:** <Link_Video_Huong_Dan trong Sheet>
+     - 🎥 **Video Hướng Dẫn:** <Link_Video_Huong_Dan / Link_Video_HD trong Sheet>
+     - 🖼️ **Hình ảnh minh họa:** <Link_Anh_Truc_Tiep trong Sheet>
      - ⚠️ **Lưu ý quan trọng:** <Luu_y trong Sheet>
 
 🧠 QUY TẮC DUY TRÌ BỐI CẢNH (Context Memory):
