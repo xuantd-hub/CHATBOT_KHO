@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Text Footer Note Engine", version="4300.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Synchronized Engine", version="4400.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,7 +100,6 @@ async def load_sheet_data_async():
     return {"status": "success"}
 
 def get_auto_reset_minutes() -> int:
-    """Đọc thời gian tự động xóa từ Tab 0_CAI_DAT. Để trống hoặc 0 -> TẮT TÍNH NĂNG"""
     cai_dat_records = RAM_CACHE.get(TAB_CONFIG, [])
     if not cai_dat_records:
         return 0
@@ -116,8 +115,8 @@ def get_auto_reset_minutes() -> int:
 def health_check():
     return {
         "status": "healthy", 
-        "version": "4300.0", 
-        "engine": "Text Footer Note Engine",
+        "version": "4400.0", 
+        "engine": "Synchronized Precision Engine",
         "auto_reset_minutes": get_auto_reset_minutes(),
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
@@ -222,7 +221,7 @@ def extract_user_text(event: dict) -> str:
     return deep_search(event)
 
 # ------------------------------------------------------------------------------
-# QUÉT BỐI CẢNH MODEL VÀ CATEGORY THÔNG MINH (4 TẦNG)
+# QUÉT BỐI CẢNH MODEL VÀ CATEGORY THÔNG MINH
 # ------------------------------------------------------------------------------
 def extract_device_info_from_history(messages: list) -> tuple:
     device_models = ["spr02", "spr01", "k200l", "k200u", "a868", "hprt", "80fe", "spl01", "xp350b", "g8", "a160m", "xprinter", "imin"]
@@ -273,9 +272,7 @@ def extract_device_info_from_history(messages: list) -> tuple:
                     history_category = "máy in tem"
                     break
 
-    # --------------------------------------------------------------------------
-    # LOGIC XỬ LÝ BỐI CẢNH THÔNG MINH
-    # --------------------------------------------------------------------------
+    # LOGIC XỬ LÝ BỐI CẢNH
     if latest_model:
         cat = latest_category or history_category or ""
         return latest_model, cat
@@ -300,9 +297,6 @@ def extract_platform_intent(messages: list) -> str:
                 return "mobile"
     return ""
 
-# ------------------------------------------------------------------------------
-# LLM ROUTER BẢO TỒN Ý ĐỊNH DỰA TRÊN CHUỖI BỐI CẢNH
-# ------------------------------------------------------------------------------
 def extract_latest_action_intent_keywords(messages: list) -> str:
     for m in reversed(messages):
         if m.get("role") in ["user", "Khach_Hang"]:
@@ -371,7 +365,10 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     detected_model, detected_category = extract_device_info_from_history(messages_list)
     platform_intent = extract_platform_intent(messages_list)
     action_intent = await extract_latest_action_intent(messages_list)
-    has_device_info = bool(detected_model or detected_category)
+    
+    # 🎯 ĐIỀU CHỈNH CHỐNG LỖI MẤT CÂU HỎI MODEL:
+    # CHỈ KHI CÓ MODEL CỤ THỂ HOẶC HỎI CHÍNH SÁCH CHUNG THÌ MỚI ĐỌC LÀ HAS_DEVICE_INFO = TRUE
+    has_device_info = bool(detected_model) or (action_intent == "policy")
 
     stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "thế", "nào", "bao", "nhiêu", "thông", "số", "qua", "đã", "ok", "rồi", "nhưng", "lại", "muốn"}
     words = [w for w in combined_user_text.split() if len(w) > 1 and w not in stop_words]
@@ -464,8 +461,8 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
 🎯 BỘ QUY TẮC XỬ LÝ QUAN TRỌNG NHẤT (TUÂN THỦ 100%):
 
 1. 🛑 QUY TẮC PHÁT HIỆN THIẾU LOẠI MÁY IN / MODEL MÁY (DEVICE CLARIFICATION RULE):
-   - Nếu trong Kho dữ liệu báo `HAS_DEVICE_INFO: False` (nghĩa là người dùng CHƯA CUNG CẤP tên model máy và CHƯA NÓI RÕ là Máy in hóa đơn hay Máy in tem mã vạch):
-   - **TUYỆT ĐỐI CẤM tự ý suy đoán người dùng đang dùng Máy in hóa đơn!**
+   - Nếu trong Kho dữ liệu báo `HAS_DEVICE_INFO: False` (nghĩa là người dùng CHƯA CUNG CẤP tên model máy cụ thể):
+   - **TUYỆT ĐỐI CẤM tự ý suy đoán người dùng đang dùng Máy in hóa đơn hay Máy in tem!**
    - **TUYỆT ĐỐI CẤM tự ý xả bài hướng dẫn xử lý lỗi hay bài cài đặt của Máy in hóa đơn!**
    - **BẮT BUỘC hỏi lại ngay 1 câu khoanh vùng phân loại máy:**
      "Dạ, để em đưa ra hướng dẫn khắc phục chính xác nhất, anh/chị cho em hỏi mình đang sử dụng loại máy in nào ạ?
@@ -474,7 +471,7 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
       
       Anh/chị cho em xin tên model cụ thể ghi trên máy để em gửi hướng dẫn chuẩn 100% cho mình nhé!"
 
-2. 🛑 TRƯỜNG HỢP 2: KHI ĐÃ CÓ TÊN MODEL MÁY HOẶC ĐÃ NÓI RÕ LOẠI MÁY IN (`HAS_DEVICE_INFO: True`):
+2. 🛑 TRƯỜNG HỢP 2: KHI ĐÃ CÓ TÊN MODEL MÁY CỤ THỂ (`HAS_DEVICE_INFO: True`):
    - **BÁM SÁT 100% NỘI DUNG SHEET:** BẮT BUỘC phải trích xuất chính xác từng câu, từng bước và link có trong Dữ liệu bên dưới.
    - Khi Dữ liệu có bài hướng dẫn cài trên **Mac** (như Dòng 3 Tab 2), AI BẮT BUỘC xuất đầy đủ bài hướng dẫn Mac và dán link `Link_Driver_Mac`. TUYỆT ĐỐI KHÔNG báo "không có dữ liệu Mac"!
    - Khi Dữ liệu có bài hướng dẫn cài trên **Windows**, AI xuất bài Windows và link `Link_Driver_Win`.
@@ -560,21 +557,21 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         except Exception as e:
             print(f"⚠️ Gemini Exception: {str(e)}")
 
-    return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhắn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
+    return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
 
 # ------------------------------------------------------------------------------
-# HÀM WRAPPER GỬI TIN NHẮN TỰ ĐỘNG CHÈN CHỮ GHI CHÚ CHÂN TRANG (TEXT FOOTER NOTE)
+# HÀM WRAPPER GỬI TIN NHẮN DÀNH CHO WORKSPACE ADD-ON (GHI CHÚ NGẮN TỰ NHIÊN)
 # ------------------------------------------------------------------------------
 def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) -> dict:
     clean_text = clean_thinking_process(text_message)
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', clean_text)
     clean_text = re.sub(r'\*{2,3}', '*', clean_text)
     
-    # TỰ ĐỘNG THÊM DÒNG CHỮ GHI CHÚ NỔI BẬT DƯỚI CÙNG CỦA CÂU TRẢ LỜI
+    # DÒNG HƯỚNG DẪN IN NGHIÊNG NHỎ GỌN TỰ NHIÊN Ở CHÂN TRANG
     if show_reset_note and "Em đã xóa bộ nhớ" not in clean_text:
         footer_note = (
-            "\n\n---\n"
-            "💡 *Mẹo: Để bắt đầu cuộc trò chuyện mới (hỏi máy khác), anh/chị chỉ cần nhắn **\"bắt đầu cuộc trò chuyện mới\"** hoặc **\"xóa lịch sử\"** nhé! (Việc này giúp đảm bảo thông tin hỗ trợ luôn chính xác nhất).* 🔄"
+            "\n\n"
+            "_💡 Mẹo: Nhắn \"bắt đầu cuộc trò chuyện mới\" hoặc \"xóa lịch sử\"  để đảm bảo dữ liệu chính xác nhất khi cần đổi máy, hoặc hỏi thông tin khác nhé!_"
         )
         clean_text += footer_note
 
@@ -615,7 +612,7 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
 # ------------------------------------------------------------------------------
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - SIÊU ỔN ĐỊNH CÓ CHỮ GHI CHÚ HƯỚNG DẪN
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - ĐỒNG BỘ NGUYÊN TẮC HỎI MODEL
 # ------------------------------------------------------------------------------
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -634,8 +631,8 @@ async def google_chat_webhook(request: Request):
 
         # A. NHẬN DIỆN MỌI CÂU LỆNH CHỮ LÀM MỚI BỘ NHỚ
         reset_keywords = {
-            "xóa lịch sử", "xoa lich su", "bắt đầu lại", "bat dau lai", 
-            "hỏi máy khác", "hoi may khac","chủ đề mới", "chu de moi",
+            "xóa lịch sử", "xoa lich su", 
+            "chủ đề mới", "chu de moi",
             "bắt đầu cuộc trò chuyện mới", "bat dau cuoc tro chuyen moi",
             "bắt đầu trò chuyện mới", "bat dau tro chuyen moi",
             "xóa lịch sử cuộc trò chuyện", "xoa lich su cuoc tro chuyen"
