@@ -570,8 +570,8 @@ def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) 
     # DÒNG HƯỚNG DẪN IN NGHIÊNG NHỎ GỌN TỰ NHIÊN Ở CHÂN TRANG
     if show_reset_note and "Em đã xóa bộ nhớ" not in clean_text:
         footer_note = (
-            "\n\n"
-            "_💡 Mẹo: Nhắn \"bắt đầu cuộc trò chuyện mới\" hoặc \"xóa lịch sử\"  để đảm bảo dữ liệu chính xác nhất khi cần đổi máy, hoặc hỏi thông tin khác nhé!_"
+            "\n\n───────────────────────────────\n"
+            "> 💡 _Mẹo: Để đảm bảo dữ liệu chính xác nhất bạn hãy nhắn \"xóa lịch sử\" hoặc \"bắt đầu cuộc trò chuyện mới\" khi cần hỏi thông tin khác nhé!_"
         )
         clean_text += footer_note
 
