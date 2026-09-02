@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Perfect Workspace Add-on Engine", version="4200.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Text Footer Note Engine", version="4300.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -116,8 +116,8 @@ def get_auto_reset_minutes() -> int:
 def health_check():
     return {
         "status": "healthy", 
-        "version": "4200.0", 
-        "engine": "Perfect Workspace Add-on Engine",
+        "version": "4300.0", 
+        "engine": "Text Footer Note Engine",
         "auto_reset_minutes": get_auto_reset_minutes(),
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
@@ -560,45 +560,31 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         except Exception as e:
             print(f"⚠️ Gemini Exception: {str(e)}")
 
-    return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
+    return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhắn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
 
 # ------------------------------------------------------------------------------
-# HÀM WRAPPER BỌC 100% DỮ LIỆU NÚT BẤM VÀ VĂN BẢN VÀO SCHEMA ADD-ON NGUYÊN BẢN
+# HÀM WRAPPER GỬI TIN NHẮN TỰ ĐỘNG CHÈN CHỮ GHI CHÚ CHÂN TRANG (TEXT FOOTER NOTE)
 # ------------------------------------------------------------------------------
-def wrap_google_chat_response(text_message: str, show_reset_button: bool = True) -> dict:
+def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) -> dict:
     clean_text = clean_thinking_process(text_message)
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', clean_text)
     clean_text = re.sub(r'\*{2,3}', '*', clean_text)
     
-    msg_payload = {"text": clean_text}
-    
-    # NÚT BẤM BỌC AN TOÀN TRONG CARDSV2 MÀ KHÔNG GÂY THỪA KEY Ở CẤP PROXIES
-    if show_reset_button:
-        msg_payload["cardsV2"] = [{
-            "cardId": "reset_session_card",
-            "card": {
-                "sections": [{
-                    "widgets": [{
-                        "buttonList": {
-                            "buttons": [{
-                                "text": "🔄 Bắt đầu trò chuyện mới",
-                                "onClick": {
-                                    "action": {
-                                        "function": "RESET_CHAT_HISTORY"
-                                    }
-                                }
-                            }]
-                        }
-                    }]
-                }]
-            }
-        }]
+    # TỰ ĐỘNG THÊM DÒNG CHỮ GHI CHÚ NỔI BẬT DƯỚI CÙNG CỦA CÂU TRẢ LỜI
+    if show_reset_note and "Em đã xóa bộ nhớ" not in clean_text:
+        footer_note = (
+            "\n\n---\n"
+            "💡 *Mẹo: Để bắt đầu cuộc trò chuyện mới (hỏi máy khác), anh/chị chỉ cần nhắn **\"bắt đầu cuộc trò chuyện mới\"** hoặc **\"xóa lịch sử\"** nhé! (Việc này giúp đảm bảo thông tin hỗ trợ luôn chính xác nhất).* 🔄"
+        )
+        clean_text += footer_note
 
     return {
         "hostAppDataAction": {
             "chatDataAction": {
                 "createMessageAction": {
-                    "message": msg_payload
+                    "message": {
+                        "text": clean_text
+                    }
                 }
             }
         }
@@ -629,53 +615,41 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
 # ------------------------------------------------------------------------------
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - HOÀN HẢO NÚT BẤM & TIN NHẮN
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - SIÊU ỔN ĐỊNH CÓ CHỮ GHI CHÚ HƯỚNG DẪN
 # ------------------------------------------------------------------------------
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
     try:
         event = await request.json()
-        space_id = event.get("space", {}).get("name") or event.get("user", {}).get("name") or "default_space"
-
-        # BẮT TÊN HÀM NÚT BẤM KHI NGƯỜI DÙNG CLICK TRÊN MÀN HÌNH
-        invoked_func = ""
-        if isinstance(event.get("common"), dict):
-            invoked_func = event["common"].get("invokedFunction", "")
-        if isinstance(event.get("action"), dict):
-            invoked_func = invoked_func or event["action"].get("actionMethodName", "") or event["action"].get("function", "")
-
-        event_type = event.get("type") or event.get("chat", {}).get("type") or ""
-
-        # A. NẾU BẤM NÚT "BẮT ĐẦU TRÒ CHUYỆN MỚI" -> TỰ ĐỘNG XÓA BỐI CẢNH VÀ XÁC NHẬN
-        if invoked_func == "RESET_CHAT_HISTORY" or event_type == "CARD_CLICKED":
-            GOOGLE_CHAT_HISTORY[space_id] = []
-            GOOGLE_CHAT_LAST_ACTIVE[space_id] = time.time()
-            return JSONResponse(content=wrap_google_chat_response(
-                "🧹 Em đã xóa bộ nhớ bối cảnh cuộc trò chuyện! Anh/chị cần em hỗ trợ cài đặt hay xử lý lỗi thiết bị nào mới ạ? 😊", 
-                show_reset_button=False
-            ))
-
-        # B. XỬ LÝ TIN NHẮN CHỮ BÌNH THƯỜNG
         user_message = extract_user_text(event)
         cleaned_message = re.sub(r'<.*?>', '', user_message).replace("@Trợ Lý KHO Sapo", "").strip()
 
+        space_id = event.get("space", {}).get("name") or event.get("user", {}).get("name") or "default_space"
+
+        event_type = event.get("type") or event.get("chat", {}).get("type") or ""
         if event_type == "ADDED_TO_SPACE":
-            return JSONResponse(content=wrap_google_chat_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!", show_reset_button=False))
+            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!", show_reset_note=False))
 
         clean_user_q = re.sub(r'[^\w\s]', '', cleaned_message.lower()).strip()
 
-        # Xử lý khi gõ chữ phím tắt
-        reset_keywords = {"0", "reset", "xóa lịch sử", "xoa lich su", "bắt đầu lại", "bat dau lai", "hỏi máy khác", "hoi may khac", "làm mới", "lam moi", "chủ đề mới", "chu de moi"}
+        # A. NHẬN DIỆN MỌI CÂU LỆNH CHỮ LÀM MỚI BỘ NHỚ
+        reset_keywords = {
+            "xóa lịch sử", "xoa lich su", "bắt đầu lại", "bat dau lai", 
+            "hỏi máy khác", "hoi may khac","chủ đề mới", "chu de moi",
+            "bắt đầu cuộc trò chuyện mới", "bat dau cuoc tro chuyen moi",
+            "bắt đầu trò chuyện mới", "bat dau tro chuyen moi",
+            "xóa lịch sử cuộc trò chuyện", "xoa lich su cuoc tro chuyen"
+        }
         if clean_user_q in reset_keywords:
             GOOGLE_CHAT_HISTORY[space_id] = []
             GOOGLE_CHAT_LAST_ACTIVE[space_id] = time.time()
-            return JSONResponse(content=wrap_google_chat_response("🧹 Em đã xóa bộ nhớ bối cảnh cuộc trò chuyện! Anh/chị cần em hỗ trợ cài đặt hay xử lý lỗi thiết bị nào mới ạ? 😊", show_reset_button=False))
+            return JSONResponse(content=wrap_gsuite_addon_response("🧹 Em đã xóa bộ nhớ bối cảnh cuộc trò chuyện! Anh/chị cần em hỗ trợ cài đặt hay xử lý lỗi thiết bị nào mới ạ? 😊", show_reset_note=False))
 
         exact_quick_greetings = {"chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe", "xin chào"}
         if not cleaned_message or clean_user_q in exact_quick_greetings:
-            return JSONResponse(content=wrap_google_chat_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?", show_reset_button=False))
+            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?", show_reset_note=False))
 
-        # C. TỰ ĐỘNG LÀM SẠCH BỘ NHỚ THEO THỜI GIAN RẢNH (TTL DYNAMIC TỪ SHEET)
+        # B. TỰ ĐỘNG LÀM SẠCH BỘ NHỚ THEO THỜI GIAN RẢNH (TTL DYNAMIC TỪ SHEET)
         now = time.time()
         last_active = GOOGLE_CHAT_LAST_ACTIVE.get(space_id, 0)
         reset_minutes = get_auto_reset_minutes()
@@ -687,7 +661,7 @@ async def google_chat_webhook(request: Request):
 
         GOOGLE_CHAT_LAST_ACTIVE[space_id] = now
 
-        # D. LƯU THOẠI VÀ CHẠY RAG CÙNG BỐI CẢNH 4 TẦNG THÔNG MINH
+        # C. LƯU THOẠI VÀ CHẠY RAG CÙNG BỐI CẢNH 4 TẦNG THÔNG MINH
         if space_id not in GOOGLE_CHAT_HISTORY:
             GOOGLE_CHAT_HISTORY[space_id] = []
         
@@ -703,7 +677,7 @@ async def google_chat_webhook(request: Request):
 
         GOOGLE_CHAT_HISTORY[space_id].append({"role": "assistant", "text": ai_response})
 
-        return JSONResponse(content=wrap_google_chat_response(ai_response, show_reset_button=True))
+        return JSONResponse(content=wrap_gsuite_addon_response(ai_response, show_reset_note=True))
 
     except Exception:
-        return JSONResponse(content=wrap_google_chat_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏", show_reset_button=False))
+        return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhắn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏", show_reset_note=False))
