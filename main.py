@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Level 2 Hybrid Router Engine", version="3000.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Link Healing Engine", version="3100.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,8 +100,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "3000.0", 
-        "engine": "Level 2 Hybrid Router Engine",
+        "version": "3100.0", 
+        "engine": "Link Healing Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -117,7 +117,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# LÀM SẠCH VĂN BẢN (KHỬ MÃ LATEX MŨI TÊN $\rightarrow$)
+# LÀM SẠCH VĂN BẢN VÀ KHÔI PHỤC LINK NGUYÊN BẢN TỰ ĐỘNG
 # ------------------------------------------------------------------------------
 def clean_thinking_process(text: str) -> str:
     if "Here's a thinking process:" in text:
@@ -127,6 +127,54 @@ def clean_thinking_process(text: str) -> str:
     text = re.sub(r'---+', '', text)
     text = re.sub(r'\$\\rightarrow\$|\\rightarrow|\$\\Rightarrow\$|\\Rightarrow', '➔', text)
     return text.strip()
+
+def restore_exact_urls(text: str, top_matches: list) -> str:
+    """
+    🛠️ BỘ LỌC TỰ CHỮA LỖI LINK (LINK HEALING):
+    Nếu AI làm méo mó link (như S-S-S-S-S), Python tự động phục hồi link gốc 100% từ Sheet.
+    """
+    if not top_matches:
+        return text
+
+    actual_urls = []
+    for score, tab, row in top_matches:
+        for k, v in row.items():
+            val_str = str(v).strip()
+            if val_str.startswith("http://") or val_str.startswith("https://"):
+                actual_urls.append(val_str)
+
+    if not actual_urls:
+        return text
+
+    url_pattern = re.compile(r'https?://[^\s\)\>\]]+')
+    found_urls = url_pattern.findall(text)
+
+    for found_url in found_urls:
+        clean_found = found_url.rstrip('.,;')
+        
+        # Nếu phát hiện link bị lỗi lặp S-S-S hoặc không khớp hoàn toàn link gốc
+        if "S-S-S" in clean_found or "-S-S-" in clean_found or clean_found not in actual_urls:
+            matched_url = None
+            if "drive.google.com" in clean_found:
+                for u in actual_urls:
+                    if "drive.google.com" in u:
+                        matched_url = u
+                        break
+            elif "docs.google.com" in clean_found:
+                for u in actual_urls:
+                    if "docs.google.com" in u:
+                        matched_url = u
+                        break
+            elif "youtube.com" in clean_found or "youtu.be" in clean_found:
+                for u in actual_urls:
+                    if "youtube.com" in u or "youtu.be" in u:
+                        matched_url = u
+                        break
+
+            if matched_url:
+                text = text.replace(clean_found, matched_url)
+
+    return text
 
 def extract_user_text(event: dict) -> str:
     if isinstance(event.get("message"), dict):
@@ -190,11 +238,6 @@ def extract_device_info_from_history(messages: list) -> tuple:
     return detected_model, detected_category
 
 def extract_platform_intent(messages: list) -> str:
-    """
-    🎯 BẢO TỒN HỆ ĐIỀU HÀNH VĨNH VIỄN:
-    Quét ngược từ tin nhắn mới nhất về cũ nhất. Dù đã qua 10 câu, 
-    chỉ cần câu 1 người dùng từng gõ "Mac", hệ thống vẫn nhớ 100% là "Mac".
-    """
     for m in reversed(messages):
         if m.get("role") in ["user", "Khach_Hang"]:
             txt = m.get("text", "").lower()
@@ -210,7 +253,6 @@ def extract_platform_intent(messages: list) -> str:
 # CẤP ĐỘ 2: LLM INTENT ROUTER BẢO VỆ 2 LỚP (HYBRID ROUTER + KEYWORD FALLBACK)
 # ------------------------------------------------------------------------------
 def extract_latest_action_intent_keywords(messages: list) -> str:
-    """Hàm bảo vệ dự phòng bằng từ khóa nếu LLM Router gặp sự cố"""
     for m in reversed(messages):
         if m.get("role") in ["user", "Khach_Hang"]:
             txt = m.get("text", "").lower()
@@ -225,18 +267,12 @@ def extract_latest_action_intent_keywords(messages: list) -> str:
     return ""
 
 async def extract_latest_action_intent(messages: list) -> str:
-    """
-    🎯 LLM INTENT ROUTER (CẤP ĐỘ 2):
-    Phân loại ý định ngữ cảnh thông minh trong 0.1s, tự hiểu nói lóng/sai chính tả.
-    Có lớp Fallback dự phòng bằng từ khóa nếu mất mạng hoặc API trễ quá 1.2s.
-    """
     user_msgs = [m.get("text", "") for m in messages if m.get("role") in ["user", "Khach_Hang"]]
     if not user_msgs:
         return ""
     
     latest_user_text = user_msgs[-1].strip()
 
-    # 1. THỬ GỌI AI ROUTER PHÂN LOẠI NHANH (TIMEOUT 1.2s)
     if HTTP_CLIENT and CEREBRAS_API_KEY and CEREBRAS_MODEL and latest_user_text:
         try:
             router_prompt = f"""Bạn là bộ phân loại ý định hỗ trợ kỹ thuật cho Sapo.
@@ -268,9 +304,8 @@ Nhãn:"""
                     if valid_intent in intent_res:
                         return valid_intent
         except Exception:
-            pass # Tự động chuyển xuống Lớp 2 nếu bị lỗi/timeout
+            pass
 
-    # 2. LỚP BẢO VỆ FALLBACK: Thuật toán quét từ khóa ngược
     return extract_latest_action_intent_keywords(messages)
 
 # ------------------------------------------------------------------------------
@@ -284,14 +319,14 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
 
     detected_model, detected_category = extract_device_info_from_history(messages_list)
     platform_intent = extract_platform_intent(messages_list)
-    action_intent = await extract_latest_action_intent(messages_list)  # Gọi AI Router Cấp độ 2
+    action_intent = await extract_latest_action_intent(messages_list)
     has_device_info = bool(detected_model or detected_category)
 
     stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "thế", "nào", "bao", "nhiêu", "thông", "số", "qua", "đã", "ok", "rồi", "nhưng", "lại", "muốn"}
     words = [w for w in combined_user_text.split() if len(w) > 1 and w not in stop_words]
 
-    tech_rows = []    # Luồng Kỹ thuật (Tab 1, Tab 2, NHAN_DIEN_THIET_BI)
-    policy_rows = []  # Luồng Chính sách & Nội bộ (Tab 3, Tab 4)
+    tech_rows = []    
+    policy_rows = []  
 
     for tab in accessible_tabs:
         for row in RAM_CACHE.get(tab, []):
@@ -302,19 +337,12 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
                 if w in row_text:
                     score += 25
 
-            # ------------------------------------------------------------------
-            # LUỒNG A: TAB CHÍNH SÁCH & NỘI BỘ (Tab 3 & Tab 4)
-            # ------------------------------------------------------------------
             if tab in ["3_CHINH_SACH_SAPO", "4_DU_LIEU_NOI_BO"]:
-                score += 300  # Điểm cộng căn cước cho dữ liệu chung
+                score += 300  
                 if action_intent == "policy":
                     score += 1000
                 if score > 0:
                     policy_rows.append((score, tab, row))
-
-            # ------------------------------------------------------------------
-            # LUỒNG B: TAB KỸ THUẬT & CÀI ĐẶT (Tab 1 & Tab 2)
-            # ------------------------------------------------------------------
             else:
                 if detected_model and detected_model in row_text:
                     score += 300
@@ -336,7 +364,6 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     tech_rows.sort(key=lambda x: x[0], reverse=True)
     policy_rows.sort(key=lambda x: x[0], reverse=True)
 
-    # 🎯 KẾT HỢP DUAL-CHANNEL: Đảm bảo bộ nhớ AI nhận được đầy đủ dữ liệu từ cả 2 phía
     top_matches = []
     if action_intent == "policy":
         top_matches = policy_rows[:3] + tech_rows[:1]
@@ -350,10 +377,10 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
             if value: 
                 knowledge_text += f"- {key}: {value}\n"
 
-    return knowledge_text, has_device_info
+    return knowledge_text, has_device_info, top_matches
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG NGUYÊN BẢN 2600.0 / 2800.0
+# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG NGUYÊN BẢN
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str, has_device_info: bool) -> str:
     return f"""
@@ -507,11 +534,12 @@ async def chat_stream(req: ChatRequest):
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
-    focused_knowledge, has_device_info = await get_high_precision_knowledge(req.messages, req.role)
+    focused_knowledge, has_device_info, top_matches = await get_high_precision_knowledge(req.messages, req.role)
     system_instruction = build_smart_system_prompt(focused_knowledge, has_device_info)
 
     async def generate_response_stream():
         ans = await call_llm_with_history(system_instruction, req.messages)
+        ans = restore_exact_urls(ans, top_matches) # 🛠️ Phục hồi link chuẩn 100%
         yield ans
 
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
@@ -544,10 +572,11 @@ async def google_chat_webhook(request: Request):
         if len(GOOGLE_CHAT_HISTORY[space_id]) > 10:
             GOOGLE_CHAT_HISTORY[space_id] = GOOGLE_CHAT_HISTORY[space_id][-10:]
 
-        focused_knowledge, has_device_info = await get_high_precision_knowledge(GOOGLE_CHAT_HISTORY[space_id], role="Sale")
+        focused_knowledge, has_device_info, top_matches = await get_high_precision_knowledge(GOOGLE_CHAT_HISTORY[space_id], role="Sale")
         system_instruction = build_smart_system_prompt(focused_knowledge, has_device_info)
 
         ai_response = await call_llm_with_history(system_instruction, GOOGLE_CHAT_HISTORY[space_id])
+        ai_response = restore_exact_urls(ai_response, top_matches) # 🛠️ Phục hồi link chuẩn 100%
 
         GOOGLE_CHAT_HISTORY[space_id].append({"role": "assistant", "text": ai_response})
 
