@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Link Healing Engine", version="3100.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Intent Stacking Engine", version="3200.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,8 +100,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "3100.0", 
-        "engine": "Link Healing Engine",
+        "version": "3200.0", 
+        "engine": "Intent Stacking Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -136,7 +136,6 @@ def restore_exact_urls(text: str, top_matches: list) -> str:
     if not top_matches:
         return text
 
-    # Lấy toàn bộ link thật trong dòng dữ liệu
     win_url = ""
     mac_url = ""
     doc_url = ""
@@ -157,8 +156,6 @@ def restore_exact_urls(text: str, top_matches: list) -> str:
 
     for found_url in found_urls:
         clean_found = found_url.rstrip('.,;')
-        
-        # Phát hiện link rác/link ví dụ do AI bịa ra
         if "1S_" in clean_found or "S-S-S" in clean_found or "Driver_Win" in clean_found or "Guide" in clean_found:
             replacement = None
             if "Driver_Win" in clean_found or "win" in clean_found.lower():
@@ -173,7 +170,6 @@ def restore_exact_urls(text: str, top_matches: list) -> str:
             if replacement:
                 text = text.replace(clean_found, replacement)
 
-    # Xóa bỏ các câu chú thích "(Ví dụ)" thừa do AI tự thêm
     text = re.sub(r'\s*\(\s*Ví dụ\s*\)', '', text, flags=re.IGNORECASE)
     return text
 
@@ -251,7 +247,7 @@ def extract_platform_intent(messages: list) -> str:
     return ""
 
 # ------------------------------------------------------------------------------
-# CẤP ĐỘ 2: LLM INTENT ROUTER BẢO VỆ 2 LỚP (HYBRID ROUTER + KEYWORD FALLBACK)
+# CẤP ĐỘ 2 BỔ SUNG BẢO TỒN Ý ĐỊNH ĐA LƯỢT CHAT (INTENT STACKING)
 # ------------------------------------------------------------------------------
 def extract_latest_action_intent_keywords(messages: list) -> str:
     for m in reversed(messages):
@@ -272,12 +268,13 @@ async def extract_latest_action_intent(messages: list) -> str:
     if not user_msgs:
         return ""
     
-    latest_user_text = user_msgs[-1].strip()
+    # 🎯 GỘP 3 CÂU GẦN NHẤT ĐỂ AI ROUTER KHÔNG BỊ MẤT Ý ĐỊNH KHI KHÁCH TRẢ LỜI TÊN MODEL
+    combined_recent_text = " ".join(user_msgs[-3:]).strip()
 
-    if HTTP_CLIENT and CEREBRAS_API_KEY and CEREBRAS_MODEL and latest_user_text:
+    if HTTP_CLIENT and CEREBRAS_API_KEY and CEREBRAS_MODEL and combined_recent_text:
         try:
             router_prompt = f"""Bạn là bộ phân loại ý định hỗ trợ kỹ thuật cho Sapo.
-Hãy phân loại câu hỏi sau của khách hàng vào DUY NHẤT 1 trong các nhãn:
+Hãy phân loại đoạn hội thoại sau của khách hàng vào DUY NHẤT 1 trong các nhãn:
 - policy: Bảo hành, đổi trả, số tổng đài, hotline, sđt liên hệ, địa chỉ kho, lịch làm việc, thông tin liên hệ Sapo, quy định chung.
 - lan_setup: Cài đặt in qua mạng LAN, địa chỉ IP, kết nối Wifi, in qua App trên điện thoại/tablet (như xTest, Sapo App).
 - driver_setup: Tải driver, cài máy tính Windows, cài Mac/macOS.
@@ -285,7 +282,7 @@ Hãy phân loại câu hỏi sau của khách hàng vào DUY NHẤT 1 trong các
 - general: Chào hỏi hoặc câu hỏi chung.
 
 Chỉ trả về DUY NHẤT tên nhãn (không viết thêm giải thích).
-Câu hỏi: "{latest_user_text}"
+Đoạn hội thoại: "{combined_recent_text}"
 Nhãn:"""
 
             res = await HTTP_CLIENT.post(
@@ -540,7 +537,7 @@ async def chat_stream(req: ChatRequest):
 
     async def generate_response_stream():
         ans = await call_llm_with_history(system_instruction, req.messages)
-        ans = restore_exact_urls(ans, top_matches) # 🛠️ Phục hồi link chuẩn 100%
+        ans = restore_exact_urls(ans, top_matches)
         yield ans
 
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
@@ -577,7 +574,7 @@ async def google_chat_webhook(request: Request):
         system_instruction = build_smart_system_prompt(focused_knowledge, has_device_info)
 
         ai_response = await call_llm_with_history(system_instruction, GOOGLE_CHAT_HISTORY[space_id])
-        ai_response = restore_exact_urls(ai_response, top_matches) # 🛠️ Phục hồi link chuẩn 100%
+        ai_response = restore_exact_urls(ai_response, top_matches)
 
         GOOGLE_CHAT_HISTORY[space_id].append({"role": "assistant", "text": ai_response})
 
