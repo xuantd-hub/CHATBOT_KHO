@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Universal Precision & Dynamic Session Engine", version="3400.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Universal Precision Engine", version="3400.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,7 +33,7 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 
 RAM_CACHE = {}
 GOOGLE_CHAT_HISTORY = {} 
-GOOGLE_CHAT_LAST_ACTIVE = {} # Mốc thời gian tương tác gần nhất của từng phòng chat
+GOOGLE_CHAT_LAST_ACTIVE = {} 
 
 TABS_PUBLIC = [
     "1_THIET_BI_VA_LOI", 
@@ -100,28 +100,24 @@ async def load_sheet_data_async():
     return {"status": "success"}
 
 def get_auto_reset_minutes() -> int:
-    """
-    🎯 ĐỌC THỜI GIAN TỰ ĐỘNG RESET TỪ TAB '0_CAI_DAT' TRÊN SHEET:
-    - Nhập số dương (> 0): Xóa bộ nhớ sau số phút rảnh tương ứng.
-    - Nhập 0 hoặc Để trống: TẮT HOÀN TOÀN tính năng tự động xóa theo thời gian.
-    """
+    """An toàn đọc thời gian tự động xóa từ Tab '0_CAI_DAT'. Để trống hoặc 0 -> TẮT TÍNH NĂNG"""
     cai_dat_records = RAM_CACHE.get(TAB_CONFIG, [])
+    if not cai_dat_records:
+        return 0
     for row in cai_dat_records:
-        key = str(row.get("Ten_Cau_Hinh", "")).strip().lower()
-        if "reset" in key or "thoi_gian" in key:
-            val = str(row.get("Gia_Tri", "")).strip()
-            if val.isdigit():
-                return int(val)
-            else:
-                return 0
+        for k, v in row.items():
+            if "reset" in str(k).lower() or "thoi_gian" in str(k).lower() or "gia_tri" in str(k).lower():
+                val_str = str(v).strip()
+                if val_str.isdigit():
+                    return int(val_str)
     return 0
 
 @app.get("/")
 def health_check():
     return {
         "status": "healthy", 
-        "version": "3400.0", 
-        "engine": "Universal Precision & Dynamic Session Engine",
+        "version": "3400.1", 
+        "engine": "Universal Precision Engine",
         "auto_reset_minutes": get_auto_reset_minutes(),
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
@@ -551,40 +547,20 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
 
     return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
 
-def wrap_gsuite_addon_response(text_message: str, show_reset_button: bool = True) -> dict:
-    """Tạo response cho Google Chat có đính kèm Nút Bấm 'Bắt đầu trò chuyện mới'"""
+def wrap_gsuite_addon_response(text_message: str) -> dict:
+    """
+    🎯 ĐỊNH DẠNG HOÀN HẢO CHUẨN GOOGLE WORKSPACE ADD-ON API (KHÔNG LỖI PROTOCOL)
+    """
     clean_text = clean_thinking_process(text_message)
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', clean_text)
     clean_text = re.sub(r'\*{2,3}', '*', clean_text)
-    
-    msg_payload = {"text": clean_text}
-    
-    if show_reset_button:
-        msg_payload["cardsV2"] = [{
-            "cardId": "reset_session_card",
-            "card": {
-                "sections": [{
-                    "widgets": [{
-                        "buttonList": {
-                            "buttons": [{
-                                "text": "🔄 Bắt đầu trò chuyện mới",
-                                "onClick": {
-                                    "action": {
-                                        "actionMethodName": "RESET_CHAT_HISTORY"
-                                    }
-                                }
-                            }]
-                        }
-                    }]
-                }]
-            }
-        }]
-        
     return {
         "hostAppDataAction": {
             "chatDataAction": {
                 "createMessageAction": {
-                    "message": msg_payload
+                    "message": {
+                        "text": clean_text
+                    }
                 }
             }
         }
@@ -615,65 +591,47 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
 # ------------------------------------------------------------------------------
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - CÓ NÚT BẤM & TỰ RESET THỜI GIAN DYNAMIC
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - ĐÃ FIX 100% LỖI KHÔNG PHẢN HỒI
 # ------------------------------------------------------------------------------
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
     try:
         event = await request.json()
-        
-        space_id = event.get("space", {}).get("name") or event.get("user", {}).get("name") or "default_space"
-
-        # A. XỬ LÝ SỰ KIỆN BẤM NÚT "BẮT ĐẦU TRÒ CHUYỆN MỚI"
-        action_method = ""
-        if isinstance(event.get("action"), dict):
-            action_method = event["action"].get("actionMethodName", "")
-        elif isinstance(event.get("common"), dict):
-            action_method = event["common"].get("invokedFunction", "")
-
-        if action_method == "RESET_CHAT_HISTORY" or event.get("type") == "CARD_CLICKED":
-            GOOGLE_CHAT_HISTORY[space_id] = []
-            GOOGLE_CHAT_LAST_ACTIVE[space_id] = time.time()
-            return JSONResponse(content=wrap_gsuite_addon_response(
-                "🧹 Em đã xóa bộ nhớ bối cảnh cuộc trò chuyện! Anh/chị cần em hỗ trợ cài đặt hay xử lý lỗi thiết bị nào mới ạ? 😊", 
-                show_reset_button=False
-            ))
-
-        # B. XỬ LÝ TIN NHẮN CHỮ
         user_message = extract_user_text(event)
         cleaned_message = re.sub(r'<.*?>', '', user_message).replace("@Trợ Lý KHO Sapo", "").strip()
+
+        space_id = event.get("space", {}).get("name") or event.get("user", {}).get("name") or "default_space"
 
         event_type = event.get("type") or event.get("chat", {}).get("type") or ""
         if event_type == "ADDED_TO_SPACE":
             return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!"))
 
         clean_user_q = re.sub(r'[^\w\s]', '', cleaned_message.lower()).strip()
-        if clean_user_q in {"xóa lịch sử", "bắt đầu lại", "hỏi máy khác", "chủ đề mới", "làm mới"}:
+        
+        # A. LỜI TỪ KHÓA LÀM MỚI BỘ NHỚ AN TOÀN
+        if clean_user_q in {"xóa lịch sử", "bắt đầu lại", "hỏi máy khác", "chủ đề mới", "làm mới", "reset"}:
             GOOGLE_CHAT_HISTORY[space_id] = []
             GOOGLE_CHAT_LAST_ACTIVE[space_id] = time.time()
-            return JSONResponse(content=wrap_gsuite_addon_response(
-                "🧹 Em đã xóa bộ nhớ bối cảnh cuộc trò chuyện! Anh/chị cần em hỗ trợ thiết bị nào mới ạ? 😊", 
-                show_reset_button=False
-            ))
+            return JSONResponse(content=wrap_gsuite_addon_response("🧹 Em đã xóa bộ nhớ bối cảnh cuộc trò chuyện! Anh/chị cần em hỗ trợ cài đặt hay xử lý lỗi thiết bị nào mới ạ? 😊"))
 
         exact_quick_greetings = {"chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe", "xin chào"}
         if not cleaned_message or clean_user_q in exact_quick_greetings:
             return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"))
 
-        # C. TỰ ĐỘNG LÀM SẠCH BỘ NHỚ THEO THỜI GIAN RẢNH (TTL DYNAMIC)
+        # B. TỰ ĐỘNG LÀM SẠCH BỘ NHỚ THEO THỜI GIAN RẢNH (TTL DYNAMIC)
         now = time.time()
         last_active = GOOGLE_CHAT_LAST_ACTIVE.get(space_id, 0)
         reset_minutes = get_auto_reset_minutes()
 
-        # CHỈ TỰ ĐỘNG XÓA KHI reset_minutes > 0 (Nếu để trống hoặc nhập 0 -> TẮT hoàn toàn tính năng này)
+        # CHỈ TỰ ĐỘNG XÓA KHI reset_minutes > 0 (Nếu để trống hoặc nhập 0 -> TẮT tính năng)
         if reset_minutes > 0 and last_active > 0:
             timeout_seconds = reset_minutes * 60
             if (now - last_active) > timeout_seconds:
-                GOOGLE_CHAT_HISTORY[space_id] = [] # Quá thời gian chờ -> Tự động xóa bối cảnh cũ
+                GOOGLE_CHAT_HISTORY[space_id] = []
 
         GOOGLE_CHAT_LAST_ACTIVE[space_id] = now
 
-        # D. LƯU THOẠI VÀ CHẠY RAG
+        # C. LƯU THOẠI VÀ CHẠY RAG
         if space_id not in GOOGLE_CHAT_HISTORY:
             GOOGLE_CHAT_HISTORY[space_id] = []
         
@@ -689,7 +647,7 @@ async def google_chat_webhook(request: Request):
 
         GOOGLE_CHAT_HISTORY[space_id].append({"role": "assistant", "text": ai_response})
 
-        return JSONResponse(content=wrap_gsuite_addon_response(ai_response, show_reset_button=True))
+        return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
 
     except Exception:
         return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"))
