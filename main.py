@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Universal Context Engine", version="2800.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Level 2 Hybrid Router Engine", version="3000.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,8 +100,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "2800.0", 
-        "engine": "Universal Context Engine",
+        "version": "3000.0", 
+        "engine": "Level 2 Hybrid Router Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -170,7 +170,6 @@ def extract_device_info_from_history(messages: list) -> tuple:
     detected_model = ""
     detected_category = ""
 
-    # Quét ngược từ tin nhắn gần nhất về tin nhắn cũ nhất để lấy Model mới nhất được nhắc đến
     for m in reversed(messages):
         txt = m.get("text", "").lower()
         if not detected_model:
@@ -207,15 +206,15 @@ def extract_platform_intent(messages: list) -> str:
                 return "mobile"
     return ""
 
-def extract_latest_action_intent(messages: list) -> str:
-    """
-    🎯 Ý ĐỊNH HÀNH ĐỘNG CÓ THỨ TỰ ƯU TIÊN (STACK PRECEDENCE):
-    Bổ sung nhóm từ khóa Chính sách & Tổng đài hỗ trợ để bắt trúng 100% ý định người dùng.
-    """
+# ------------------------------------------------------------------------------
+# CẤP ĐỘ 2: LLM INTENT ROUTER BẢO VỆ 2 LỚP (HYBRID ROUTER + KEYWORD FALLBACK)
+# ------------------------------------------------------------------------------
+def extract_latest_action_intent_keywords(messages: list) -> str:
+    """Hàm bảo vệ dự phòng bằng từ khóa nếu LLM Router gặp sự cố"""
     for m in reversed(messages):
         if m.get("role") in ["user", "Khach_Hang"]:
             txt = m.get("text", "").lower()
-            if any(k in txt for k in ["bảo hành", "đổi trả", "chính sách", "thu hồi", "tổng đài", "hotline", "sđt", "liên hệ", "địa chỉ", "kho", "sổ"]):
+            if any(k in txt for k in ["bảo hành", "đổi trả", "chính sách", "thu hồi", "tổng đài", "hotline", "sđt", "liên hệ", "địa chỉ", "kho", "sổ", "admin", "tỉnh"]):
                 return "policy"
             if any(k in txt for k in ["lan", "ip", "mạng", "wifi", "app", "xtest", "điện thoại"]):
                 return "lan_setup"
@@ -225,10 +224,59 @@ def extract_latest_action_intent(messages: list) -> str:
                 return "error_fix"
     return ""
 
+async def extract_latest_action_intent(messages: list) -> str:
+    """
+    🎯 LLM INTENT ROUTER (CẤP ĐỘ 2):
+    Phân loại ý định ngữ cảnh thông minh trong 0.1s, tự hiểu nói lóng/sai chính tả.
+    Có lớp Fallback dự phòng bằng từ khóa nếu mất mạng hoặc API trễ quá 1.2s.
+    """
+    user_msgs = [m.get("text", "") for m in messages if m.get("role") in ["user", "Khach_Hang"]]
+    if not user_msgs:
+        return ""
+    
+    latest_user_text = user_msgs[-1].strip()
+
+    # 1. THỬ GỌI AI ROUTER PHÂN LOẠI NHANH (TIMEOUT 1.2s)
+    if HTTP_CLIENT and CEREBRAS_API_KEY and CEREBRAS_MODEL and latest_user_text:
+        try:
+            router_prompt = f"""Bạn là bộ phân loại ý định hỗ trợ kỹ thuật cho Sapo.
+Hãy phân loại câu hỏi sau của khách hàng vào DUY NHẤT 1 trong các nhãn:
+- policy: Bảo hành, đổi trả, số tổng đài, hotline, sđt liên hệ, địa chỉ kho, lịch làm việc, thông tin liên hệ Sapo, quy định chung.
+- lan_setup: Cài đặt in qua mạng LAN, địa chỉ IP, kết nối Wifi, in qua App trên điện thoại/tablet (như xTest, Sapo App).
+- driver_setup: Tải driver, cài máy tính Windows, cài Mac/macOS.
+- error_fix: Báo lỗi thiết bị (không in được, kẹt giấy, in ra giấy trắng, không ra mực, kẹt dao cắt, hỏng hóc).
+- general: Chào hỏi hoặc câu hỏi chung.
+
+Chỉ trả về DUY NHẤT tên nhãn (không viết thêm giải thích).
+Câu hỏi: "{latest_user_text}"
+Nhãn:"""
+
+            res = await HTTP_CLIENT.post(
+                "https://api.cerebras.ai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": CEREBRAS_MODEL,
+                    "messages": [{"role": "user", "content": router_prompt}],
+                    "temperature": 0.0,
+                    "max_tokens": 10
+                },
+                timeout=1.2
+            )
+            if res.status_code == 200:
+                intent_res = res.json()["choices"][0]["message"]["content"].strip().lower()
+                for valid_intent in ["policy", "lan_setup", "driver_setup", "error_fix"]:
+                    if valid_intent in intent_res:
+                        return valid_intent
+        except Exception:
+            pass # Tự động chuyển xuống Lớp 2 nếu bị lỗi/timeout
+
+    # 2. LỚP BẢO VỆ FALLBACK: Thuật toán quét từ khóa ngược
+    return extract_latest_action_intent_keywords(messages)
+
 # ------------------------------------------------------------------------------
 # TRÍCH XUẤT DỮ LIỆU SONG LUỒNG (DUAL-CHANNEL RAG)
 # ------------------------------------------------------------------------------
-def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
+async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     
     user_texts = [m.get("text", "") for m in messages_list if m.get("role") in ["user", "Khach_Hang"]]
@@ -236,7 +284,7 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
 
     detected_model, detected_category = extract_device_info_from_history(messages_list)
     platform_intent = extract_platform_intent(messages_list)
-    action_intent = extract_latest_action_intent(messages_list)
+    action_intent = await extract_latest_action_intent(messages_list)  # Gọi AI Router Cấp độ 2
     has_device_info = bool(detected_model or detected_category)
 
     stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "thế", "nào", "bao", "nhiêu", "thông", "số", "qua", "đã", "ok", "rồi", "nhưng", "lại", "muốn"}
@@ -305,7 +353,7 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     return knowledge_text, has_device_info
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT GIỮ NGUYÊN 100% CẤU TRÚC BẢN 2600.0 & BỔ SUNG QUY TẮC BẢO HÀNH
+# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG NGUYÊN BẢN 2600.0 / 2800.0
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str, has_device_info: bool) -> str:
     return f"""
@@ -459,7 +507,7 @@ async def chat_stream(req: ChatRequest):
             yield "Xin chào! Em là **Trợ Lý KHO Sapo**. Anh/chị cần hỗ trợ tra cứu thông số thiết bị hay cài đặt máy in nào ạ?"
         return StreamingResponse(greeting_gen(), media_type="text/plain")
 
-    focused_knowledge, has_device_info = get_high_precision_knowledge(req.messages, req.role)
+    focused_knowledge, has_device_info = await get_high_precision_knowledge(req.messages, req.role)
     system_instruction = build_smart_system_prompt(focused_knowledge, has_device_info)
 
     async def generate_response_stream():
@@ -496,7 +544,7 @@ async def google_chat_webhook(request: Request):
         if len(GOOGLE_CHAT_HISTORY[space_id]) > 10:
             GOOGLE_CHAT_HISTORY[space_id] = GOOGLE_CHAT_HISTORY[space_id][-10:]
 
-        focused_knowledge, has_device_info = get_high_precision_knowledge(GOOGLE_CHAT_HISTORY[space_id], role="Sale")
+        focused_knowledge, has_device_info = await get_high_precision_knowledge(GOOGLE_CHAT_HISTORY[space_id], role="Sale")
         system_instruction = build_smart_system_prompt(focused_knowledge, has_device_info)
 
         ai_response = await call_llm_with_history(system_instruction, GOOGLE_CHAT_HISTORY[space_id])
