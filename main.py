@@ -130,21 +130,27 @@ def clean_thinking_process(text: str) -> str:
 
 def restore_exact_urls(text: str, top_matches: list) -> str:
     """
-    🛠️ BỘ LỌC TỰ CHỮA LỖI LINK (LINK HEALING):
-    Nếu AI làm méo mó link (như S-S-S-S-S), Python tự động phục hồi link gốc 100% từ Sheet.
+    🛠️ BỘ LỌC TỰ CHỮA LỖI LINK NÂNG CẤP (STRONG LINK HEALING):
+    Ép đè 100% link thật từ Sheet vào bài viết, triệt hạ hoàn toàn link bịa/link rác 1S_...
     """
     if not top_matches:
         return text
 
-    actual_urls = []
+    # Lấy toàn bộ link thật trong dòng dữ liệu
+    win_url = ""
+    mac_url = ""
+    doc_url = ""
+    video_url = ""
+
     for score, tab, row in top_matches:
         for k, v in row.items():
             val_str = str(v).strip()
             if val_str.startswith("http://") or val_str.startswith("https://"):
-                actual_urls.append(val_str)
-
-    if not actual_urls:
-        return text
+                key_lower = str(k).lower()
+                if "win" in key_lower: win_url = val_str
+                elif "mac" in key_lower: mac_url = val_str
+                elif "video" in key_lower: video_url = val_str
+                elif "noi_dung" in key_lower or "huong_dan" in key_lower: doc_url = val_str
 
     url_pattern = re.compile(r'https?://[^\s\)\>\]]+')
     found_urls = url_pattern.findall(text)
@@ -152,28 +158,23 @@ def restore_exact_urls(text: str, top_matches: list) -> str:
     for found_url in found_urls:
         clean_found = found_url.rstrip('.,;')
         
-        # Nếu phát hiện link bị lỗi lặp S-S-S hoặc không khớp hoàn toàn link gốc
-        if "S-S-S" in clean_found or "-S-S-" in clean_found or clean_found not in actual_urls:
-            matched_url = None
-            if "drive.google.com" in clean_found:
-                for u in actual_urls:
-                    if "drive.google.com" in u:
-                        matched_url = u
-                        break
-            elif "docs.google.com" in clean_found:
-                for u in actual_urls:
-                    if "docs.google.com" in u:
-                        matched_url = u
-                        break
-            elif "youtube.com" in clean_found or "youtu.be" in clean_found:
-                for u in actual_urls:
-                    if "youtube.com" in u or "youtu.be" in u:
-                        matched_url = u
-                        break
+        # Phát hiện link rác/link ví dụ do AI bịa ra
+        if "1S_" in clean_found or "S-S-S" in clean_found or "Driver_Win" in clean_found or "Guide" in clean_found:
+            replacement = None
+            if "Driver_Win" in clean_found or "win" in clean_found.lower():
+                replacement = win_url or doc_url
+            elif "Driver_Mac" in clean_found or "mac" in clean_found.lower():
+                replacement = mac_url or doc_url
+            elif "Video" in clean_found or "youtube" in clean_found.lower():
+                replacement = video_url
+            elif "Guide" in clean_found or "doc" in clean_found.lower():
+                replacement = doc_url or win_url
+            
+            if replacement:
+                text = text.replace(clean_found, replacement)
 
-            if matched_url:
-                text = text.replace(clean_found, matched_url)
-
+    # Xóa bỏ các câu chú thích "(Ví dụ)" thừa do AI tự thêm
+    text = re.sub(r'\s*\(\s*Ví dụ\s*\)', '', text, flags=re.IGNORECASE)
     return text
 
 def extract_user_text(event: dict) -> str:
