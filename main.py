@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Universal Precision Engine", version="3400.1")
+app = FastAPI(title="Trợ Lý KHO Sapo Perfect Context & Button Engine", version="3500.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,7 +100,7 @@ async def load_sheet_data_async():
     return {"status": "success"}
 
 def get_auto_reset_minutes() -> int:
-    """An toàn đọc thời gian tự động xóa từ Tab '0_CAI_DAT'. Để trống hoặc 0 -> TẮT TÍNH NĂNG"""
+    """Đọc thời gian tự động xóa từ Tab 0_CAI_DAT. Để trống hoặc 0 -> TẮT TÍNH NĂNG"""
     cai_dat_records = RAM_CACHE.get(TAB_CONFIG, [])
     if not cai_dat_records:
         return 0
@@ -116,8 +116,8 @@ def get_auto_reset_minutes() -> int:
 def health_check():
     return {
         "status": "healthy", 
-        "version": "3400.1", 
-        "engine": "Universal Precision Engine",
+        "version": "3500.0", 
+        "engine": "Perfect Context & Button Engine",
         "auto_reset_minutes": get_auto_reset_minutes(),
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
@@ -134,7 +134,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# LÀM SẠCH VĂN BẢN VÀ KHÔI PHỤC LINK NGUYÊN BẢN TỰ ĐỘNG (TAB 1 + TAB 2)
+# LÀM SẠCH VĂN BẢN VÀ KHÔI PHỤC LINK NGUYÊN BẢN TỰ ĐỘNG
 # ------------------------------------------------------------------------------
 def clean_thinking_process(text: str) -> str:
     if "Here's a thinking process:" in text:
@@ -146,10 +146,6 @@ def clean_thinking_process(text: str) -> str:
     return text.strip()
 
 def restore_exact_urls(text: str, top_matches: list) -> str:
-    """
-    🛠️ BỘ LỌC TỰ CHỮA LỖI LINK ĐỒNG BỘ TOÀN DẠNG (TAB 1 & TAB 2):
-    Ép đè 100% link thật từ Sheet (bao gồm link ảnh minh họa Tab 1 & link Driver Tab 2).
-    """
     if not top_matches:
         return text
 
@@ -226,18 +222,52 @@ def extract_user_text(event: dict) -> str:
     return deep_search(event)
 
 # ------------------------------------------------------------------------------
-# QUÉT NGƯỢC LỊCH SỬ GIỮ MODEL VÀ HỆ ĐIỀU HÀNH
+# TRÍCH XUẤT THIẾT BỊ CHUẨN XÁC - TRÁNH TRUYỀN BỐI CẢNH MODEL CŨ
 # ------------------------------------------------------------------------------
 def extract_device_info_from_history(messages: list) -> tuple:
     device_models = ["spr02", "spr01", "k200l", "k200u", "a868", "hprt", "80fe", "spl01", "xp350b", "g8", "a160m", "xprinter", "imin"]
     receipt_keywords = ["hóa đơn", "bill", "tính tiền"]
     label_keywords = ["tem", "mã vạch", "barcode", "nhãn"]
 
+    user_msgs = [m.get("text", "") for m in messages if m.get("role") in ["user", "Khach_Hang"]]
+    if not user_msgs:
+        return "", ""
+
+    latest_txt = user_msgs[-1].lower()
+    
+    # 1. Kiểm tra xem tin nhắn mới nhất có chứa model cụ thể không
+    latest_model = ""
+    for dev in device_models:
+        if dev in latest_txt:
+            latest_model = dev
+            break
+
+    # 2. Kiểm tra xem tin nhắn mới nhất có chứa loại máy chung không
+    latest_category = ""
+    for r_kw in receipt_keywords:
+        if r_kw in latest_txt:
+            latest_category = "máy in hóa đơn"
+            break
+    if not latest_category:
+        for l_kw in label_keywords:
+            if l_kw in latest_txt:
+                latest_category = "máy in tem"
+                break
+
+    # 🎯 NẾU CÂU MỚI NHẤT HỎI LOẠI MÁY CHUNG (VD: "máy in hóa đơn") MÀ KHÔNG CÓ TÊN MODEL CỤ THỂ
+    # -> BẮT BUỘC KHÔNG BỐC MODEL CŨ TỪ LỊCH SỬ (Ép AI phải hỏi lại tên model)
+    if latest_category and not latest_model:
+        return "", latest_category
+
+    # NẾU CÂU MỚI NHẤT ĐÃ CÓ TÊN MODEL -> DÙNG LUÔN
+    if latest_model:
+        return latest_model, latest_category or ("máy in hóa đơn" if any(k in latest_txt for k in receipt_keywords) else "máy in tem" if any(k in latest_txt for k in label_keywords) else "")
+
+    # NẾU CÂU MỚI NHẤT LÀ CÂU MỞ RỘNG (VD: "bị lỗi", "cài win") -> MỚI QUÉT LỊCH SỬ CŨ
     detected_model = ""
     detected_category = ""
-
-    for m in reversed(messages):
-        txt = m.get("text", "").lower()
+    for m in reversed(user_msgs):
+        txt = m.lower()
         if not detected_model:
             for dev in device_models:
                 if dev in txt:
@@ -268,7 +298,7 @@ def extract_platform_intent(messages: list) -> str:
     return ""
 
 # ------------------------------------------------------------------------------
-# LLM ROUTER BẢO TỒN Ý ĐỊNH DỰA TRÊN CHUỖI BỐI CẢNH (CONTEXT STACKING)
+# LLM ROUTER BẢO TỒN Ý ĐỊNH DỰA TRÊN CHUỖI BỐI CẢNH
 # ------------------------------------------------------------------------------
 def extract_latest_action_intent_keywords(messages: list) -> str:
     for m in reversed(messages):
@@ -327,7 +357,7 @@ Nhãn:"""
     return extract_latest_action_intent_keywords(messages)
 
 # ------------------------------------------------------------------------------
-# MA TRẬN ĐIỀU HƯỚNG TRÍCH XUẤT DỮ LIỆU CHÍNH XÁC (STRICT INTENT MATRIX)
+# MA TRẬN ĐIỀU HƯỚNG TRÍCH XUẤT DỮ LIỆU CHÍNH XÁC
 # ------------------------------------------------------------------------------
 async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
@@ -356,9 +386,6 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
                 if w in row_text:
                     score += 25
 
-            # ------------------------------------------------------------------
-            # MA TRẬN PHÂN CHIA ĐIỂM ƯU TIÊN THEO Ý ĐỊNH
-            # ------------------------------------------------------------------
             if tab in ["3_CHINH_SACH_SAPO", "4_DU_LIEU_NOI_BO"]:
                 score += 300  
                 if action_intent == "policy":
@@ -367,32 +394,19 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
                     policy_rows.append((score, tab, row))
 
             elif tab == "1_THIET_BI_VA_LOI":
-                if detected_model and detected_model in row_text:
-                    score += 300
-                if detected_category and detected_category in row_text:
-                    score += 150
-                # 🎯 KHI BÁO LỖI: TAB 1 ĐƯỢC CỘNG ĐIỂM TỰA NÚI CAO NHẤT (1000 ĐIỂM)
-                if action_intent == "error_fix":
-                    score += 1000
-                if score > 0:
-                    tech_rows.append((score, tab, row))
+                if detected_model and detected_model in row_text: score += 300
+                if detected_category and detected_category in row_text: score += 150
+                if action_intent == "error_fix": score += 1000
+                if score > 0: tech_rows.append((score, tab, row))
 
             elif tab == "2_HUONG_DAN_CAI_DAT":
-                if detected_model and detected_model in row_text:
-                    score += 300
-                if detected_category and detected_category in row_text:
-                    score += 150
-                # 🎯 KHI CÀI ĐẶT: TAB 2 MỚI ĐƯỢC CỘNG ĐIỂM ƯU TIÊN
+                if detected_model and detected_model in row_text: score += 300
+                if detected_category and detected_category in row_text: score += 150
                 row_thao_tac = str(row.get("Loai_Thao_Tac", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower() + " " + str(row.get("Noi_Dung_Huong_Dan", "")).lower()
-                if action_intent in ["lan_setup", "driver_setup"]:
-                    score += 1000
-                if platform_intent == "mac" and "mac" in row_thao_tac:
-                    score += 300
-                elif platform_intent == "windows" and ("win" in row_thao_tac or "windows" in row_thao_tac):
-                    score += 300
-                
-                if score > 0:
-                    tech_rows.append((score, tab, row))
+                if action_intent in ["lan_setup", "driver_setup"]: score += 1000
+                if platform_intent == "mac" and "mac" in row_thao_tac: score += 300
+                elif platform_intent == "windows" and ("win" in row_thao_tac or "windows" in row_thao_tac): score += 300
+                if score > 0: tech_rows.append((score, tab, row))
 
             else:
                 if detected_model and detected_model in row_text: score += 300
@@ -417,7 +431,7 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     return knowledge_text, has_device_info, top_matches
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT ĐỊNH HƯỚNG XỬ LÝ LỖI CHÍNH XÁC THEO TAB 1
+# SYSTEM PROMPT
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str, has_device_info: bool) -> str:
     return f"""
@@ -499,7 +513,6 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         role_type = "user" if m.get("role") in ["user", "Khach_Hang"] else "assistant"
         messages_payload.append({"role": role_type, "content": m.get("text", "")})
 
-    # 1. THỬ GỌI CEREBRAS API
     if CEREBRAS_API_KEY and CEREBRAS_MODEL:
         url = "https://api.cerebras.ai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"}
@@ -520,7 +533,6 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         except Exception as e:
             print(f"⚠️ Cerebras Exception: {str(e)}")
 
-    # 2. DỰ PHÒNG CHUYỂN SANG GEMINI NẾU CEREBRAS NGHỄN/BẬN
     if GEMINI_API_KEY:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
@@ -547,20 +559,42 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
 
     return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
 
-def wrap_gsuite_addon_response(text_message: str) -> dict:
+def wrap_gsuite_addon_response(text_message: str, show_reset_button: bool = True) -> dict:
     """
-    🎯 ĐỊNH DẠNG HOÀN HẢO CHUẨN GOOGLE WORKSPACE ADD-ON API (KHÔNG LỖI PROTOCOL)
+    🎯 CHUẨN HOÀN HẢO GOOGLE WORKSPACE ADD-ON CARD BUTTON API
     """
     clean_text = clean_thinking_process(text_message)
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', clean_text)
     clean_text = re.sub(r'\*{2,3}', '*', clean_text)
+    
+    msg_payload = {"text": clean_text}
+    
+    if show_reset_button:
+        msg_payload["cardsV2"] = [{
+            "cardId": "reset_session_card",
+            "card": {
+                "sections": [{
+                    "widgets": [{
+                        "buttonList": {
+                            "buttons": [{
+                                "text": "🔄 Bắt đầu trò chuyện mới",
+                                "onClick": {
+                                    "action": {
+                                        "function": "RESET_CHAT_HISTORY"
+                                    }
+                                }
+                            }]
+                        }
+                    }]
+                }]
+            }
+        }]
+        
     return {
         "hostAppDataAction": {
             "chatDataAction": {
                 "createMessageAction": {
-                    "message": {
-                        "text": clean_text
-                    }
+                    "message": msg_payload
                 }
             }
         }
@@ -591,39 +625,52 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
 # ------------------------------------------------------------------------------
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - ĐÃ FIX 100% LỖI KHÔNG PHẢN HỒI
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - HOÀN HẢO NÚT BẤM & RESET BỐI CẢNH
 # ------------------------------------------------------------------------------
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
     try:
         event = await request.json()
+        space_id = event.get("space", {}).get("name") or event.get("user", {}).get("name") or "default_space"
+
+        # A. XỬ LÝ SỰ KIỆN NÚT BẤM "BẮT ĐẦU TRÒ CHUYỆN MỚI"
+        action_function = ""
+        if isinstance(event.get("common"), dict):
+            action_function = event["common"].get("invokedFunction", "")
+        if isinstance(event.get("action"), dict):
+            action_function = action_function or event["action"].get("actionMethodName", "") or event["action"].get("function", "")
+
+        if action_function == "RESET_CHAT_HISTORY" or event.get("type") == "CARD_CLICKED":
+            GOOGLE_CHAT_HISTORY[space_id] = []
+            GOOGLE_CHAT_LAST_ACTIVE[space_id] = time.time()
+            return JSONResponse(content=wrap_gsuite_addon_response(
+                "🧹 Em đã xóa bộ nhớ bối cảnh cuộc trò chuyện! Anh/chị cần em hỗ trợ cài đặt hay xử lý lỗi thiết bị nào mới ạ? 😊", 
+                show_reset_button=False
+            ))
+
+        # B. XỬ LÝ TIN NHẮN CHỮ
         user_message = extract_user_text(event)
         cleaned_message = re.sub(r'<.*?>', '', user_message).replace("@Trợ Lý KHO Sapo", "").strip()
-
-        space_id = event.get("space", {}).get("name") or event.get("user", {}).get("name") or "default_space"
 
         event_type = event.get("type") or event.get("chat", {}).get("type") or ""
         if event_type == "ADDED_TO_SPACE":
             return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!"))
 
         clean_user_q = re.sub(r'[^\w\s]', '', cleaned_message.lower()).strip()
-        
-        # A. LỜI TỪ KHÓA LÀM MỚI BỘ NHỚ AN TOÀN
         if clean_user_q in {"xóa lịch sử", "bắt đầu lại", "hỏi máy khác", "chủ đề mới", "làm mới", "reset"}:
             GOOGLE_CHAT_HISTORY[space_id] = []
             GOOGLE_CHAT_LAST_ACTIVE[space_id] = time.time()
-            return JSONResponse(content=wrap_gsuite_addon_response("🧹 Em đã xóa bộ nhớ bối cảnh cuộc trò chuyện! Anh/chị cần em hỗ trợ cài đặt hay xử lý lỗi thiết bị nào mới ạ? 😊"))
+            return JSONResponse(content=wrap_gsuite_addon_response("🧹 Em đã xóa bộ nhớ bối cảnh cuộc trò chuyện! Anh/chị cần em hỗ trợ cài đặt hay xử lý lỗi thiết bị nào mới ạ? 😊", show_reset_button=False))
 
         exact_quick_greetings = {"chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe", "xin chào"}
         if not cleaned_message or clean_user_q in exact_quick_greetings:
             return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"))
 
-        # B. TỰ ĐỘNG LÀM SẠCH BỘ NHỚ THEO THỜI GIAN RẢNH (TTL DYNAMIC)
+        # C. TỰ ĐỘNG LÀM SẠCH BỘ NHỚ THEO THỜI GIAN RẢNH (TTL DYNAMIC)
         now = time.time()
         last_active = GOOGLE_CHAT_LAST_ACTIVE.get(space_id, 0)
         reset_minutes = get_auto_reset_minutes()
 
-        # CHỈ TỰ ĐỘNG XÓA KHI reset_minutes > 0 (Nếu để trống hoặc nhập 0 -> TẮT tính năng)
         if reset_minutes > 0 and last_active > 0:
             timeout_seconds = reset_minutes * 60
             if (now - last_active) > timeout_seconds:
@@ -631,7 +678,7 @@ async def google_chat_webhook(request: Request):
 
         GOOGLE_CHAT_LAST_ACTIVE[space_id] = now
 
-        # C. LƯU THOẠI VÀ CHẠY RAG
+        # D. LƯU THOẠI VÀ CHẠY RAG
         if space_id not in GOOGLE_CHAT_HISTORY:
             GOOGLE_CHAT_HISTORY[space_id] = []
         
@@ -647,7 +694,7 @@ async def google_chat_webhook(request: Request):
 
         GOOGLE_CHAT_HISTORY[space_id].append({"role": "assistant", "text": ai_response})
 
-        return JSONResponse(content=wrap_gsuite_addon_response(ai_response))
+        return JSONResponse(content=wrap_gsuite_addon_response(ai_response, show_reset_button=True))
 
     except Exception:
         return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"))
