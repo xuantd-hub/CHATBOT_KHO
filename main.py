@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Universal Context Engine", version="2600.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Universal Context Engine", version="2800.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,7 +100,7 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "2600.0", 
+        "version": "2800.0", 
         "engine": "Universal Context Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
@@ -210,24 +210,23 @@ def extract_platform_intent(messages: list) -> str:
 def extract_latest_action_intent(messages: list) -> str:
     """
     🎯 Ý ĐỊNH HÀNH ĐỘNG CÓ THỨ TỰ ƯU TIÊN (STACK PRECEDENCE):
-    Quét ngược để lấy Ý ĐỊNH HÀNH ĐỘNG GẦN NHẤT. Nếu câu 1 hỏi "driver", 
-    câu 4 hỏi "LAN", thì LAN xuất hiện trước nên sẽ đè lên driver cũ.
+    Bổ sung nhóm từ khóa Chính sách & Tổng đài hỗ trợ để bắt trúng 100% ý định người dùng.
     """
     for m in reversed(messages):
         if m.get("role") in ["user", "Khach_Hang"]:
             txt = m.get("text", "").lower()
+            if any(k in txt for k in ["bảo hành", "đổi trả", "chính sách", "thu hồi", "tổng đài", "hotline", "sđt", "liên hệ", "địa chỉ", "kho", "sổ"]):
+                return "policy"
             if any(k in txt for k in ["lan", "ip", "mạng", "wifi", "app", "xtest", "điện thoại"]):
                 return "lan_setup"
             if any(k in txt for k in ["driver", "cài", "setup", "máy tính", "windows", "mac"]):
                 return "driver_setup"
             if any(k in txt for k in ["lỗi", "không", "kẹt", "hư", "trắng", "mực", "cắt", "sửa", "ra mực", "không ra"]):
                 return "error_fix"
-            if any(k in txt for k in ["bảo hành", "đổi trả", "chính sách", "thu hồi"]):
-                return "policy"
     return ""
 
 # ------------------------------------------------------------------------------
-# TRÍCH XUẤT DỮ LIỆU RAG THÔNG MINH
+# TRÍCH XUẤT DỮ LIỆU SONG LUỒNG (DUAL-CHANNEL RAG)
 # ------------------------------------------------------------------------------
 def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
@@ -243,44 +242,58 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "thế", "nào", "bao", "nhiêu", "thông", "số", "qua", "đã", "ok", "rồi", "nhưng", "lại", "muốn"}
     words = [w for w in combined_user_text.split() if len(w) > 1 and w not in stop_words]
 
-    scored_rows = []
-    for tab in accessible_tabs:
-        tab_bonus = 0
-        if action_intent in ["lan_setup", "driver_setup"] and tab == "2_HUONG_DAN_CAI_DAT": tab_bonus = 500
-        elif action_intent == "error_fix" and tab == "1_THIET_BI_VA_LOI": tab_bonus = 500
-        elif action_intent == "policy" and tab == "3_CHINH_SACH_SAPO": tab_bonus = 500
+    tech_rows = []    # Luồng Kỹ thuật (Tab 1, Tab 2, NHAN_DIEN_THIET_BI)
+    policy_rows = []  # Luồng Chính sách & Nội bộ (Tab 3, Tab 4)
 
+    for tab in accessible_tabs:
         for row in RAM_CACHE.get(tab, []):
             row_text = " ".join(str(v).lower() for v in row.values())
-            score = tab_bonus
-            
-            # Khớp tên thiết bị
-            if detected_model and detected_model in row_text:
-                score += 300
-            if detected_category and detected_category in row_text:
-                score += 150
-
-            # 🎯 BỘ THƯỞNG ĐIỂM CHÍNH XÁC THEO HỆ ĐIỀU HÀNH VÀ HÀNH ĐỘNG
-            if tab == "2_HUONG_DAN_CAI_DAT":
-                row_thao_tac = str(row.get("Loai_Thao_Tac", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower() + " " + str(row.get("Noi_Dung_Huong_Dan", "")).lower()
-                if action_intent == "lan_setup" and any(k in row_thao_tac for k in ["lan", "ip", "mạng", "app", "xtest"]):
-                    score += 1000
-                elif platform_intent == "mac" and "mac" in row_thao_tac:
-                    score += 1000
-                elif platform_intent == "windows" and ("win" in row_thao_tac or "windows" in row_thao_tac):
-                    score += 1000
-                elif platform_intent == "mobile" and any(k in row_thao_tac for k in ["app", "xtest", "lan", "điện thoại", "mobile"]):
-                    score += 1000
+            score = 0
             
             for w in words:
                 if w in row_text:
                     score += 25
-            
-            if score > 0:
-                scored_rows.append((score, tab, row))
 
-    scored_rows.sort(key=lambda x: x[0], reverse=True)
-    top_matches = scored_rows[:3]
+            # ------------------------------------------------------------------
+            # LUỒNG A: TAB CHÍNH SÁCH & NỘI BỘ (Tab 3 & Tab 4)
+            # ------------------------------------------------------------------
+            if tab in ["3_CHINH_SACH_SAPO", "4_DU_LIEU_NOI_BO"]:
+                score += 300  # Điểm cộng căn cước cho dữ liệu chung
+                if action_intent == "policy":
+                    score += 1000
+                if score > 0:
+                    policy_rows.append((score, tab, row))
+
+            # ------------------------------------------------------------------
+            # LUỒNG B: TAB KỸ THUẬT & CÀI ĐẶT (Tab 1 & Tab 2)
+            # ------------------------------------------------------------------
+            else:
+                if detected_model and detected_model in row_text:
+                    score += 300
+                if detected_category and detected_category in row_text:
+                    score += 150
+
+                if tab == "2_HUONG_DAN_CAI_DAT":
+                    row_thao_tac = str(row.get("Loai_Thao_Tac", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower() + " " + str(row.get("Noi_Dung_Huong_Dan", "")).lower()
+                    if action_intent == "lan_setup" and any(k in row_thao_tac for k in ["lan", "ip", "mạng", "app", "xtest"]):
+                        score += 800
+                    elif platform_intent == "mac" and "mac" in row_thao_tac:
+                        score += 800
+                    elif platform_intent == "windows" and ("win" in row_thao_tac or "windows" in row_thao_tac):
+                        score += 800
+                
+                if score > 0:
+                    tech_rows.append((score, tab, row))
+
+    tech_rows.sort(key=lambda x: x[0], reverse=True)
+    policy_rows.sort(key=lambda x: x[0], reverse=True)
+
+    # 🎯 KẾT HỢP DUAL-CHANNEL: Đảm bảo bộ nhớ AI nhận được đầy đủ dữ liệu từ cả 2 phía
+    top_matches = []
+    if action_intent == "policy":
+        top_matches = policy_rows[:3] + tech_rows[:1]
+    else:
+        top_matches = tech_rows[:2] + policy_rows[:2]
 
     knowledge_text = f"HAS_DEVICE_INFO: {has_device_info}\nDETECTED_MODEL: {detected_model}\nDETECTED_CATEGORY: {detected_category}\nPLATFORM_INTENT: {platform_intent}\nACTION_INTENT: {action_intent}\n"
     for score, tab, row in top_matches:
@@ -292,7 +305,7 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     return knowledge_text, has_device_info
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG & ÉP TÁCH DÒNG LINK
+# SYSTEM PROMPT GIỮ NGUYÊN 100% CẤU TRÚC BẢN 2600.0 & BỔ SUNG QUY TẮC BẢO HÀNH
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str, has_device_info: bool) -> str:
     return f"""
@@ -300,7 +313,7 @@ Bạn là **Trợ Lý KHO Sapo** – Trợ lý AI cao cấp, có tư duy logic s
 Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghiệp, hành văn tự nhiên, rõ ràng.
 
 🎨 QUY TẮC BỐ CỤC TRÌNH BÀY ĐẸP MẮT & DỄ ĐỌC (PRESENTATION & ICONS RULE):
-- **Sử dụng Icon/Emoji sinh động** ở đầu các tiêu đề và từng bước thao tác (VD: 💻, 🍏, 📱, 🛠️, 📌, ✅, 👉, 📄, 🎥, ⚠️).
+- **Sử dụng Icon/Emoji sinh động** ở đầu các tiêu đề và từng bước thao tác (VD: 💻, 🍏, 📱, 🛠️, 📌, ✅, 👉, 📄, 🎥, ⚠️, 📞).
 - **Chia nhỏ đoạn văn thoáng đãng**, dùng danh sách gạch đầu dòng (Bullet points).
 - **In đậm các từ khóa quan trọng**, tên nút bấm, tên bước (VD: **Bước 1: Tải Driver**, **Link Driver Mac:**).
 
@@ -308,6 +321,11 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
 - BẮT BUỘC mỗi đường link URL, hình ảnh hoặc video hướng dẫn phải nằm trên một dòng riêng biệt bắt đầu bằng dấu gạch đầu dòng (`- `).
 - TUYỆT ĐỐI CẤM dán 2 icon hay 2 link trên cùng 1 dòng ngang!
 - TUYỆT ĐỐI CẤM tự xuất các câu trong ngoặc vuông giả lập như `[Anh/chị vui lòng...]` hay `[Link...]`. Chỉ dán đường link URL thực tế `https://...` nếu có trong Kho dữ liệu.
+
+📌 QUY TẮC BẮT BUỘC VỀ CHÍNH SÁCH BẢO HÀNH & TỔNG ĐÀI (POLICY RULE):
+1. Các thông tin nằm trong Tab `3_CHINH_SACH_SAPO` hoặc `4_DU_LIEU_NOI_BO` (như Thời hạn bảo hành, Điều kiện bảo hành, Số tổng đài 1900 6750, Địa chỉ...) là **CHÍNH SÁCH CHUNG ÁP DỤNG CHO TẤT CẢ THIẾT BỊ SAPO** (bao gồm SPR02, SPL01, K200L,...).
+2. Khi người dùng hỏi về Bảo hành hay Tổng đài hỗ trợ cho một thiết bị cụ thể (VD: SPR02), AI **BẮT BUỘC sử dụng ngay thông tin chính sách chung trong Kho dữ liệu để trả lời trực tiếp**.
+3. **TUYỆT ĐỐI CẤM BÁO:** "Không có văn bản cụ thể về chính sách bảo hành cho từng thiết bị" hoặc "Không có thông tin chi tiết về số tổng đài".
 
 🎯 BỘ QUY TẮC XỬ LÝ QUAN TRỌNG NHẤT (TUÂN THỦ 100%):
 
