@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Perfect Context & Button Engine", version="3500.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Interactive Card & Perfect Context Engine", version="3600.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -116,8 +116,8 @@ def get_auto_reset_minutes() -> int:
 def health_check():
     return {
         "status": "healthy", 
-        "version": "3500.0", 
-        "engine": "Perfect Context & Button Engine",
+        "version": "3600.0", 
+        "engine": "Interactive Card & Perfect Context Engine",
         "auto_reset_minutes": get_auto_reset_minutes(),
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
@@ -222,7 +222,7 @@ def extract_user_text(event: dict) -> str:
     return deep_search(event)
 
 # ------------------------------------------------------------------------------
-# TRÍCH XUẤT THIẾT BỊ CHUẨN XÁC - TRÁNH TRUYỀN BỐI CẢNH MODEL CŨ
+# QUÉT BỐI CẢNH MODEL VÀ CATEGORY THÔNG MINH (4 TẦNG)
 # ------------------------------------------------------------------------------
 def extract_device_info_from_history(messages: list) -> tuple:
     device_models = ["spr02", "spr01", "k200l", "k200u", "a868", "hprt", "80fe", "spl01", "xp350b", "g8", "a160m", "xprinter", "imin"]
@@ -253,7 +253,7 @@ def extract_device_info_from_history(messages: list) -> tuple:
                 latest_category = "máy in tem"
                 break
 
-    # 2. Quét tên Model và Category trong LỊCH SỬ CŨ (từ câu gần nhất trở về trước)
+    # 2. Quét tên Model và Category trong LỊCH SỬ CŨ
     history_model = ""
     history_category = ""
     for m in reversed(user_msgs[:-1]):
@@ -274,25 +274,18 @@ def extract_device_info_from_history(messages: list) -> tuple:
                     break
 
     # --------------------------------------------------------------------------
-    # LOGIC QUYẾT ĐỊNH BỐI CẢNH (SMART CONTEXT RESOLUTION)
+    # LOGIC XỬ LÝ BỐI CẢNH THÔNG MINH
     # --------------------------------------------------------------------------
-    
-    # Trường hợp A: CÂU MỚI ĐÃ CÓ MODEL CỤ THỂ -> Dùng luôn model mới
     if latest_model:
         cat = latest_category or history_category or ""
         return latest_model, cat
 
-    # Trường hợp B: KHÁCH CHUYỂN DÒNG MÁY KHÁC HẲN LỊCH SỬ (VD: Lịch sử là Máy In Tem, câu mới hỏi Máy In Hóa Đơn)
-    # -> Cần XÓA Model cũ để hỏi lại Model thuộc dòng máy mới
     if latest_category and history_category and (latest_category != history_category):
         return "", latest_category
 
-    # Trường hợp C: CÂU MỚI NÓI TIẾP NỐI CÙNG DÒNG MÁY (Hoặc câu mở rộng như "bị lỗi", "cài win")
-    # -> GIỮ NGUYÊN Model cũ trong lịch sử để trả lời mượt mà
     if history_model:
         return history_model, latest_category or history_category
 
-    # Trường hợp D: CHƯA CÓ MODEL CẢ TRONG CÂU MỚI LẪN LỊCH SỬ
     return "", latest_category
 
 def extract_platform_intent(messages: list) -> str:
@@ -569,18 +562,18 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
 
     return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
 
-def wrap_gsuite_addon_response(text_message: str, show_reset_button: bool = True) -> dict:
-    """
-    🎯 CHUẨN HOÀN HẢO GOOGLE WORKSPACE ADD-ON CARD BUTTON API
-    """
+# ------------------------------------------------------------------------------
+# HÀM HOÀN HẢO TẠO NÚT BẤM GOOGLE CHAT CÓ TÍCH HỢP ACTION RESPONSE
+# ------------------------------------------------------------------------------
+def wrap_gsuite_addon_response(text_message: str, show_reset_button: bool = True, is_card_click: bool = False) -> dict:
     clean_text = clean_thinking_process(text_message)
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', clean_text)
     clean_text = re.sub(r'\*{2,3}', '*', clean_text)
     
-    msg_payload = {"text": clean_text}
+    msg_obj = {"text": clean_text}
     
     if show_reset_button:
-        msg_payload["cardsV2"] = [{
+        msg_obj["cardsV2"] = [{
             "cardId": "reset_session_card",
             "card": {
                 "sections": [{
@@ -600,15 +593,21 @@ def wrap_gsuite_addon_response(text_message: str, show_reset_button: bool = True
             }
         }]
         
-    return {
+    res = {
         "hostAppDataAction": {
             "chatDataAction": {
                 "createMessageAction": {
-                    "message": msg_payload
+                    "message": msg_obj
                 }
             }
         }
     }
+    
+    # 🎯 CHÌA KHÓA DỨT ĐIỂM LỖI ĐỎ: THÊM ACTION RESPONSE KHI CÓ SỰ KIỆN BẤM NÚT
+    if is_card_click:
+        res["actionResponse"] = {"type": "NEW_MESSAGE"}
+        
+    return res
 
 # ------------------------------------------------------------------------------
 # 1. CỔNG WEB CHAT (/chat)
@@ -635,7 +634,7 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
 # ------------------------------------------------------------------------------
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - HOÀN HẢO NÚT BẤM & RESET BỐI CẢNH
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - HOẠT ĐỘNG NÚT BẤM 100% KHÔNG LỖI
 # ------------------------------------------------------------------------------
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -643,40 +642,47 @@ async def google_chat_webhook(request: Request):
         event = await request.json()
         space_id = event.get("space", {}).get("name") or event.get("user", {}).get("name") or "default_space"
 
-        # A. XỬ LÝ SỰ KIỆN NÚT BẤM "BẮT ĐẦU TRÒ CHUYỆN MỚI"
-        action_function = ""
+        event_type = event.get("type") or event.get("chat", {}).get("type") or ""
+        
+        action_func = ""
         if isinstance(event.get("common"), dict):
-            action_function = event["common"].get("invokedFunction", "")
+            action_func = event["common"].get("invokedFunction", "")
         if isinstance(event.get("action"), dict):
-            action_function = action_function or event["action"].get("actionMethodName", "") or event["action"].get("function", "")
+            action_func = action_func or event["action"].get("actionMethodName", "") or event["action"].get("function", "")
 
-        if action_function == "RESET_CHAT_HISTORY" or event.get("type") == "CARD_CLICKED":
+        is_card_click = (event_type == "CARD_CLICKED") or bool(action_func)
+
+        # A. XỬ LÝ SỰ KIỆN NÚT BẤM (CARD CLICK) -> KHÔNG LỖI ĐỎ
+        if is_card_click or action_func == "RESET_CHAT_HISTORY":
             GOOGLE_CHAT_HISTORY[space_id] = []
             GOOGLE_CHAT_LAST_ACTIVE[space_id] = time.time()
             return JSONResponse(content=wrap_gsuite_addon_response(
                 "🧹 Em đã xóa bộ nhớ bối cảnh cuộc trò chuyện! Anh/chị cần em hỗ trợ cài đặt hay xử lý lỗi thiết bị nào mới ạ? 😊", 
-                show_reset_button=False
+                show_reset_button=False,
+                is_card_click=True
             ))
 
         # B. XỬ LÝ TIN NHẮN CHỮ
         user_message = extract_user_text(event)
         cleaned_message = re.sub(r'<.*?>', '', user_message).replace("@Trợ Lý KHO Sapo", "").strip()
 
-        event_type = event.get("type") or event.get("chat", {}).get("type") or ""
         if event_type == "ADDED_TO_SPACE":
-            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!"))
+            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!", show_reset_button=False))
 
         clean_user_q = re.sub(r'[^\w\s]', '', cleaned_message.lower()).strip()
-        if clean_user_q in {"xóa lịch sử", "bắt đầu lại", "hỏi máy khác", "chủ đề mới", "làm mới", "reset"}:
+
+        # Xử lý lệnh chữ dự phòng
+        reset_keywords = {"bắt đầu lại", "bat dau lai", "hỏi máy khác", "hoi may khac", "làm mới", "lam moi", "chủ đề mới", "chu de moi"}
+        if clean_user_q in reset_keywords:
             GOOGLE_CHAT_HISTORY[space_id] = []
             GOOGLE_CHAT_LAST_ACTIVE[space_id] = time.time()
             return JSONResponse(content=wrap_gsuite_addon_response("🧹 Em đã xóa bộ nhớ bối cảnh cuộc trò chuyện! Anh/chị cần em hỗ trợ cài đặt hay xử lý lỗi thiết bị nào mới ạ? 😊", show_reset_button=False))
 
         exact_quick_greetings = {"chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe", "xin chào"}
         if not cleaned_message or clean_user_q in exact_quick_greetings:
-            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?"))
+            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?", show_reset_button=False))
 
-        # C. TỰ ĐỘNG LÀM SẠCH BỘ NHỚ THEO THỜI GIAN RẢNH (TTL DYNAMIC)
+        # C. TỰ ĐỘNG LÀM SẠCH BỘ NHỚ THEO THỜI GIAN RẢNH (TTL DYNAMIC TỪ SHEET)
         now = time.time()
         last_active = GOOGLE_CHAT_LAST_ACTIVE.get(space_id, 0)
         reset_minutes = get_auto_reset_minutes()
@@ -688,7 +694,7 @@ async def google_chat_webhook(request: Request):
 
         GOOGLE_CHAT_LAST_ACTIVE[space_id] = now
 
-        # D. LƯU THOẠI VÀ CHẠY RAG
+        # D. LƯU THOẠI VÀ CHẠY RAG CÙNG BỐI CẢNH 4 TẦNG THÔNG MINH
         if space_id not in GOOGLE_CHAT_HISTORY:
             GOOGLE_CHAT_HISTORY[space_id] = []
         
@@ -707,4 +713,4 @@ async def google_chat_webhook(request: Request):
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response, show_reset_button=True))
 
     except Exception:
-        return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"))
+        return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏", show_reset_button=False))
