@@ -234,15 +234,14 @@ def extract_device_info_from_history(messages: list) -> tuple:
         return "", ""
 
     latest_txt = user_msgs[-1].lower()
-    
-    # 1. Kiểm tra xem tin nhắn mới nhất có chứa model cụ thể không
+
+    # 1. Quét tên Model và Category trong CÂU MỚI NHẤT
     latest_model = ""
     for dev in device_models:
         if dev in latest_txt:
             latest_model = dev
             break
 
-    # 2. Kiểm tra xem tin nhắn mới nhất có chứa loại máy chung không
     latest_category = ""
     for r_kw in receipt_keywords:
         if r_kw in latest_txt:
@@ -254,36 +253,47 @@ def extract_device_info_from_history(messages: list) -> tuple:
                 latest_category = "máy in tem"
                 break
 
-    # 🎯 NẾU CÂU MỚI NHẤT HỎI LOẠI MÁY CHUNG (VD: "máy in hóa đơn") MÀ KHÔNG CÓ TÊN MODEL CỤ THỂ
-    # -> BẮT BUỘC KHÔNG BỐC MODEL CŨ TỪ LỊCH SỬ (Ép AI phải hỏi lại tên model)
-    if latest_category and not latest_model:
-        return "", latest_category
-
-    # NẾU CÂU MỚI NHẤT ĐÃ CÓ TÊN MODEL -> DÙNG LUÔN
-    if latest_model:
-        return latest_model, latest_category or ("máy in hóa đơn" if any(k in latest_txt for k in receipt_keywords) else "máy in tem" if any(k in latest_txt for k in label_keywords) else "")
-
-    # NẾU CÂU MỚI NHẤT LÀ CÂU MỞ RỘNG (VD: "bị lỗi", "cài win") -> MỚI QUÉT LỊCH SỬ CŨ
-    detected_model = ""
-    detected_category = ""
-    for m in reversed(user_msgs):
+    # 2. Quét tên Model và Category trong LỊCH SỬ CŨ (từ câu gần nhất trở về trước)
+    history_model = ""
+    history_category = ""
+    for m in reversed(user_msgs[:-1]):
         txt = m.lower()
-        if not detected_model:
+        if not history_model:
             for dev in device_models:
                 if dev in txt:
-                    detected_model = dev
+                    history_model = dev
                     break
-        if not detected_category:
+        if not history_category:
             for r_kw in receipt_keywords:
                 if r_kw in txt:
-                    detected_category = "máy in hóa đơn"
+                    history_category = "máy in hóa đơn"
                     break
             for l_kw in label_keywords:
                 if l_kw in txt:
-                    detected_category = "máy in tem"
+                    history_category = "máy in tem"
                     break
 
-    return detected_model, detected_category
+    # --------------------------------------------------------------------------
+    # LOGIC QUYẾT ĐỊNH BỐI CẢNH (SMART CONTEXT RESOLUTION)
+    # --------------------------------------------------------------------------
+    
+    # Trường hợp A: CÂU MỚI ĐÃ CÓ MODEL CỤ THỂ -> Dùng luôn model mới
+    if latest_model:
+        cat = latest_category or history_category or ""
+        return latest_model, cat
+
+    # Trường hợp B: KHÁCH CHUYỂN DÒNG MÁY KHÁC HẲN LỊCH SỬ (VD: Lịch sử là Máy In Tem, câu mới hỏi Máy In Hóa Đơn)
+    # -> Cần XÓA Model cũ để hỏi lại Model thuộc dòng máy mới
+    if latest_category and history_category and (latest_category != history_category):
+        return "", latest_category
+
+    # Trường hợp C: CÂU MỚI NÓI TIẾP NỐI CÙNG DÒNG MÁY (Hoặc câu mở rộng như "bị lỗi", "cài win")
+    # -> GIỮ NGUYÊN Model cũ trong lịch sử để trả lời mượt mà
+    if history_model:
+        return history_model, latest_category or history_category
+
+    # Trường hợp D: CHƯA CÓ MODEL CẢ TRONG CÂU MỚI LẪN LỊCH SỬ
+    return "", latest_category
 
 def extract_platform_intent(messages: list) -> str:
     for m in reversed(messages):
