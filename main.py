@@ -588,22 +588,28 @@ def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) 
     }
 
 # ------------------------------------------------------------------------------
-# HÀM LẤY MẬT KHẨU SALE ĐỘNG TỪ TAB 0_CAI_DAT TRÊN GOOGLE SHEET
+# HÀM LẤY MẬT KHẨU SALE ĐỘNG TỪ TAB 0_CAI_DAT TRÊN GOOGLE SHEET (ĐÃ FIX LỖI)
 # ------------------------------------------------------------------------------
 def get_sale_passcode() -> str:
     cai_dat_records = RAM_CACHE.get(TAB_CONFIG, [])
     if cai_dat_records:
         for row in cai_dat_records:
             row_text = " ".join(str(v).lower() for v in row.values())
-            # Tìm dòng chứa từ khóa mật khẩu Sale
+            # Tìm dòng chứa cấu hình mật khẩu Sale
             if any(kw in row_text for kw in ["mat_khau", "passcode", "pin", "sale"]):
+                # 1. Ưu tiên lấy ô ở cột Giá trị / Gia_Tri / Value
                 for k, v in row.items():
-                    val_str = str(v).strip()
-                    # Lấy giá trị ô không phải tên cột định danh
-                    if val_str and not any(key_kw in str(k).lower() for key_kw in ["ten", "key", "loai"]):
-                        return val_str
+                    k_lower = str(k).lower()
+                    if any(val_kw in k_lower for val_kw in ["gia_tri", "giá trị", "value", "val"]):
+                        if str(v).strip():
+                            return str(v).strip()
+                
+                # 2. Dự phòng: Lấy ô giá trị thứ 2 trong dòng (Cột B trên Sheet)
+                vals = [str(v).strip() for v in row.values() if str(v).strip()]
+                if len(vals) >= 2:
+                    return vals[1]
 
-    # Dự phòng mật khẩu mặc định nếu trên Sheet chưa nhập
+    # Dự phòng mật khẩu mặc định nếu trên Sheet chưa nạp được
     return os.getenv("SALE_PASSCODE", "sapo123").strip()
 
 # ------------------------------------------------------------------------------
