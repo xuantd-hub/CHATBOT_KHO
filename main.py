@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Synchronized Engine", version="4400.0")
+app = FastAPI(title="Trợ Lý KHO Sapo High-Precision & Elegant Engine", version="4600.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -115,8 +115,8 @@ def get_auto_reset_minutes() -> int:
 def health_check():
     return {
         "status": "healthy", 
-        "version": "4400.0", 
-        "engine": "Synchronized Precision Engine",
+        "version": "4600.0", 
+        "engine": "High-Precision & Elegant Engine",
         "auto_reset_minutes": get_auto_reset_minutes(),
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
@@ -133,7 +133,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# LÀM SẠCH VĂN BẢN VÀ KHÔI PHỤC LINK NGUYÊN BẢN TỰ ĐỘNG
+# LÀM SẠCH VĂN BẢN VÀ KHÔI PHỤC LINK NGUYÊN BẢN CHÍNH XÁC TỪ SHEET
 # ------------------------------------------------------------------------------
 def clean_thinking_process(text: str) -> str:
     if "Here's a thinking process:" in text:
@@ -145,48 +145,79 @@ def clean_thinking_process(text: str) -> str:
     return text.strip()
 
 def restore_exact_urls(text: str, top_matches: list) -> str:
+    # 1. Xóa triệt để các cụm "(Ví dụ)" hoặc "(ví dụ)"
+    text = re.sub(r'\s*\(\s*[Vv]í dụ:?\s*\)', '', text)
+
     if not top_matches:
         return text
 
-    win_url = ""
-    mac_url = ""
-    doc_url = ""
-    video_url = ""
-    img_urls = []
+    real_video_urls = []
+    real_doc_urls = []
+    real_win_urls = []
+    real_mac_urls = []
+    all_real_urls = []
 
+    url_regex = re.compile(r'https?://[^\s\)\>\]"\'\}]+')
+
+    # 2. Bóc tách toàn bộ URL thực tế từ ô dữ liệu Google Sheet
     for score, tab, row in top_matches:
         for k, v in row.items():
             val_str = str(v).strip()
-            if val_str.startswith("http://") or val_str.startswith("https://"):
-                key_lower = str(k).lower()
-                if "win" in key_lower: win_url = val_str
-                elif "mac" in key_lower: mac_url = val_str
-                elif "video" in key_lower or "hd" in key_lower: video_url = val_str
-                elif "anh" in key_lower or "img" in key_lower or "truc_tiep" in key_lower: img_urls.append(val_str)
-                elif "noi_dung" in key_lower or "huong_dan" in key_lower or "khac_phuc" in key_lower: doc_url = val_str
+            extracted = url_regex.findall(val_str)
+            for u in extracted:
+                clean_u = u.rstrip('.,;')
+                if clean_u not in all_real_urls:
+                    all_real_urls.append(clean_u)
 
-    url_pattern = re.compile(r'https?://[^\s\)\>\]]+')
-    found_urls = url_pattern.findall(text)
+                key_lower = str(k).lower()
+                if "win" in key_lower:
+                    if clean_u not in real_win_urls: real_win_urls.append(clean_u)
+                elif "mac" in key_lower:
+                    if clean_u not in real_mac_urls: real_mac_urls.append(clean_u)
+                elif "video" in key_lower or "hd" in key_lower or "youtube.com" in clean_u or "youtu.be" in clean_u:
+                    if clean_u not in real_video_urls: real_video_urls.append(clean_u)
+                else:
+                    if clean_u not in real_doc_urls: real_doc_urls.append(clean_u)
+
+    # 3. Nếu dữ liệu gốc không có link nào, xóa các dòng link giả lập
+    if not all_real_urls:
+        text = re.sub(r'-\s*(🎥|📄|💻|🍏|🖼️)?\s*[^:\n]+:\s*https?://[^\s\)\>\]]+\n?', '', text)
+        return text
+
+    # 4. Thay thế tất cả các link mẫu thành LINK THẬT TỪ SHEET
+    found_urls = url_regex.findall(text)
+    video_idx = 0
+    doc_idx = 0
 
     for found_url in found_urls:
         clean_found = found_url.rstrip('.,;')
-        if "1S_" in clean_found or "S-S-S" in clean_found or "Driver_Win" in clean_found or "Guide" in clean_found or "link" in clean_found.lower():
+
+        is_fake = (clean_found not in all_real_urls) or any(pkg in clean_found for pkg in ["1S_", "S-S-S", "Driver_Win", "Guide", "Sapo_SPR", "sapo.vn/huong-dan"])
+
+        if is_fake:
             replacement = None
-            if "Driver_Win" in clean_found or "win" in clean_found.lower():
-                replacement = win_url or doc_url
-            elif "Driver_Mac" in clean_found or "mac" in clean_found.lower():
-                replacement = mac_url or doc_url
-            elif "Video" in clean_found or "youtube" in clean_found.lower() or "hd" in clean_found.lower():
-                replacement = video_url
-            elif "anh" in clean_found.lower() or "img" in clean_found.lower():
-                replacement = img_urls[0] if img_urls else doc_url
-            elif "Guide" in clean_found or "doc" in clean_found.lower():
-                replacement = doc_url or win_url
-            
+            clean_lower = clean_found.lower()
+
+            if "youtube" in clean_lower or "video" in clean_lower or "hd" in clean_lower:
+                if real_video_urls:
+                    replacement = real_video_urls[video_idx % len(real_video_urls)]
+                    video_idx += 1
+                elif all_real_urls:
+                    replacement = all_real_urls[0]
+            elif "win" in clean_lower:
+                replacement = real_win_urls[0] if real_win_urls else (real_doc_urls[0] if real_doc_urls else all_real_urls[0])
+            elif "mac" in clean_lower:
+                replacement = real_mac_urls[0] if real_mac_urls else (real_doc_urls[0] if real_doc_urls else all_real_urls[0])
+            else:
+                if real_doc_urls:
+                    replacement = real_doc_urls[doc_idx % len(real_doc_urls)]
+                    doc_idx += 1
+                else:
+                    replacement = all_real_urls[0]
+
             if replacement:
                 text = text.replace(clean_found, replacement)
 
-    text = re.sub(r'\s*\(\s*Ví dụ\s*\)', '', text, flags=re.IGNORECASE)
     return text
 
 def extract_user_text(event: dict) -> str:
@@ -366,8 +397,6 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     platform_intent = extract_platform_intent(messages_list)
     action_intent = await extract_latest_action_intent(messages_list)
     
-    # 🎯 ĐIỀU CHỈNH CHỐNG LỖI MẤT CÂU HỎI MODEL:
-    # CHỈ KHI CÓ MODEL CỤ THỂ HOẶC HỎI CHÍNH SÁCH CHUNG THÌ MỚI ĐỌC LÀ HAS_DEVICE_INFO = TRUE
     has_device_info = bool(detected_model) or (action_intent == "policy")
 
     stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "thế", "nào", "bao", "nhiêu", "thông", "số", "qua", "đã", "ok", "rồi", "nhưng", "lại", "muốn"}
@@ -431,7 +460,7 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     return knowledge_text, has_device_info, top_matches
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT
+# SYSTEM PROMPT (CÓ ĐẦY ĐỦ ICON TRÌNH BÀY ĐẸP & CHUẨN KHO SAPO)
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str, has_device_info: bool) -> str:
     return f"""
@@ -451,7 +480,6 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
 🛑 QUY TẮC ÉP TÁCH DÒNG ĐỘC LẬP CHO TẤT CẢ LINK (SEPARATED LINK RULE):
 - BẮT BUỘC mỗi đường link URL, hình ảnh hoặc video hướng dẫn phải nằm trên một dòng riêng biệt bắt đầu bằng dấu gạch đầu dòng (`- `).
 - TUYỆT ĐỐI CẤM dán 2 icon hay 2 link trên cùng 1 dòng ngang!
-- TUYỆT ĐỐI CẤM tự xuất các câu trong ngoặc vuông giả lập như `[Anh/chị vui lòng...]` hay `[Link...]`. Chỉ dán đường link URL thực tế `https://...` nếu có trong Kho dữ liệu.
 
 📌 QUY TẮC BẮT BUỘC VỀ CHÍNH SÁCH BẢO HÀNH & TỔNG ĐÀI (POLICY RULE):
 1. Các thông tin nằm trong Tab `3_CHINH_SACH_SAPO` hoặc `4_DU_LIEU_NOI_BO` (như Thời hạn bảo hành, Điều kiện bảo hành, Số tổng đài 1900 6750, Địa chỉ...) là **CHÍNH SÁCH CHUNG ÁP DỤNG CHO TẤT CẢ THIẾT BỊ SAPO** (bao gồm SPR02, SPL01, K200L,...).
@@ -482,6 +510,7 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
 
 👉 🛑 QUY TẮC ĐÍNH KÈM LINK VÀ NỘI DUNG SHEET (TUÂN THỦ BẮT BUỘC):
    - BẮT BUỘC Copy chính xác 100% từng ký tự URL từ Kho dữ liệu, CẤM CẮT NGẮN, CẤM VIẾT TẮT (`...`) HOẶC TỰ BỊA LINK KHÔNG CÓ TRONG SHEET.
+   - TUYỆT ĐỐI CẤM THÊM CHỮ "(Ví dụ)" HOẶC "(ví dụ)" VÀO SAU CÁC ĐƯỜNG LINK HAY TRONG CÂU.
    - Xuất đầy đủ tất cả các link nếu có trong dòng dữ liệu (TUYỆT ĐỐI KHÔNG BỎ BỚT LINK VIDEO HOẶC LINK TÀI LIỆU):
      - 📄 **Tài liệu / Bài viết hướng dẫn:** <Link trong Sheet>
      - 💻 **Link Tải Driver Windows:** <Link_Driver_Win trong Sheet>
@@ -560,14 +589,13 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
     return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
 
 # ------------------------------------------------------------------------------
-# HÀM WRAPPER GỬI TIN NHẮN DÀNH CHO WORKSPACE ADD-ON (GHI CHÚ NGẮN TỰ NHIÊN)
+# HÀM WRAPPER GỬI TIN NHẮN DÀNH CHO WORKSPACE ADD-ON (GHI CHÚ CHÂN TRANG)
 # ------------------------------------------------------------------------------
 def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) -> dict:
     clean_text = clean_thinking_process(text_message)
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', clean_text)
     clean_text = re.sub(r'\*{2,3}', '*', clean_text)
     
-    # DÒNG HƯỚNG DẪN IN NGHIÊNG NHỎ GỌN TỰ NHIÊN Ở CHÂN TRANG
     if show_reset_note and "Em đã xóa bộ nhớ" not in clean_text:
         footer_note = (
             "\n\n───────────────────────────────\n"
@@ -612,7 +640,7 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
 # ------------------------------------------------------------------------------
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - ĐỒNG BỘ NGUYÊN TẮC HỎI MODEL
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat)
 # ------------------------------------------------------------------------------
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
@@ -677,4 +705,4 @@ async def google_chat_webhook(request: Request):
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response, show_reset_note=True))
 
     except Exception:
-        return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhắn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏", show_reset_note=False))
+        return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏", show_reset_note=False))
