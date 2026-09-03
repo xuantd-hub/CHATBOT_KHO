@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Absolute Precision Engine", version="5300.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Strict Execution Engine", version="5400.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -115,8 +115,8 @@ def get_auto_reset_minutes() -> int:
 def health_check():
     return {
         "status": "healthy", 
-        "version": "5300.0", 
-        "engine": "Absolute Precision Engine",
+        "version": "5400.0", 
+        "engine": "Strict Execution Engine",
         "auto_reset_minutes": get_auto_reset_minutes(),
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
@@ -133,7 +133,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# LÀM SẠCH VĂN BẢN VÀ BỘ LỌC ÉP THẾ DỮ LIỆU THẬT DỰ PHÒNG
+# LÀM SẠCH VĂN BẢN VÀ DIỆT TRIỆT ĐỂ LINK GIẢ BIT.LY
 # ------------------------------------------------------------------------------
 def clean_thinking_process(text: str) -> str:
     if "Here's a thinking process:" in text:
@@ -144,42 +144,49 @@ def clean_thinking_process(text: str) -> str:
     text = re.sub(r'\$\\rightarrow\$|\\rightarrow|\$\\Rightarrow\$|\\Rightarrow', '➔', text)
     return text.strip()
 
-def replace_placeholders_with_real_data(text: str, top_matches: list) -> str:
+def enforce_real_sheet_urls(text: str, top_matches: list) -> str:
     if not top_matches:
         return text
-    
-    merged_row = {}
+
+    win_url = ""
+    mac_url = ""
+    video_url = ""
+    doc_url = ""
+
     for score, tab, row in top_matches:
         for k, v in row.items():
-            if v and k not in merged_row:
-                merged_row[k] = str(v).strip()
-    
-    noi_dung = merged_row.get("Noi_Dung_Huong_Dan") or merged_row.get("Cach_Khac_Phuc") or ""
-    win_link = merged_row.get("Link_Driver_Win") or ""
-    mac_link = merged_row.get("Link_Driver_Mac") or ""
-    video_link = merged_row.get("Link_Video_Huong_Dan") or ""
-    img_link = merged_row.get("Link_Anh_Truc_Tiep") or merged_row.get("Link_Anh_Minh_Hoa_Tem") or ""
-    luu_y = merged_row.get("Luu_Y") or merged_row.get("Ghi_chu") or merged_row.get("Quy_Trinh_Bao_Hanh") or ""
+            val_str = str(v).strip()
+            if val_str.startswith("http://") or val_str.startswith("https://"):
+                key_lower = str(k).lower()
+                if "win" in key_lower: win_url = val_str
+                elif "mac" in key_lower: mac_url = val_str
+                elif "video" in key_lower or "hd" in key_lower: video_url = val_str
+                elif "noi_dung" in key_lower or "huong_dan" in key_lower or "khac_phuc" in key_lower:
+                    if not doc_url: doc_url = val_str
 
-    # Ép thay thế nếu AI lỡ xuất các khung ngoặc vuông
-    text = re.sub(r'\[Tại đây, em sẽ trích xuất[^\]]*\]', noi_dung, text)
-    text = re.sub(r'\[Noi_Dung_Huong_Dan\]', noi_dung, text)
-    text = re.sub(r'\[Cach_Khac_Phuc\]', noi_dung, text)
-    
-    text = re.sub(r'\[Link_Driver_Win\]', win_link, text)
-    text = re.sub(r'\[Link_Driver_Mac\]', mac_link, text)
-    text = re.sub(r'\[Link_Video_Huong_Dan\]', video_link, text)
-    text = re.sub(r'\[Link_Anh_Truc_Tiep\]', img_link, text)
-    
-    text = re.sub(r'\[Giá trị Luu_Y[^\]]*\]', luu_y, text)
-    text = re.sub(r'\[Luu_Y\]', luu_y, text)
-    text = re.sub(r'\[Ghi_chu\]', luu_y, text)
+    url_regex = re.compile(r'https?://[^\s\)\>\]"\'\}]+')
+    found_urls = url_regex.findall(text)
 
-    # Dọn dẹp các dòng bullet trống nếu link không tồn tại trong Sheet
-    text = re.sub(r'•\s*💻\s*Link Tải Driver Windows:\s*\n?', '', text)
-    text = re.sub(r'•\s*🍏\s*Link Tải Driver Mac:\s*\n?', '', text)
-    text = re.sub(r'•\s*🎥\s*Video Hướng Dẫn:\s*\n?', '', text)
-    text = re.sub(r'•\s*🖼️\s*Hình Ảnh Minh Họa:\s*\n?', '', text)
+    for found in found_urls:
+        clean_u = found.rstrip('.,;')
+        clean_lower = clean_u.lower()
+        
+        # Nếu phát hiện link bit.ly hoặc link giả lập
+        if any(fake in clean_lower for fake in ["bit.ly", "tinyurl", "example", "1_s_s_s", "driver_win", "driver_mac"]):
+            replacement = None
+            if "win" in clean_lower:
+                replacement = win_url or doc_url
+            elif "mac" in clean_lower:
+                replacement = mac_url or doc_url
+            elif "video" in clean_lower or "youtube" in clean_lower:
+                replacement = video_url
+            else:
+                replacement = doc_url or win_url
+            
+            if replacement:
+                text = text.replace(clean_u, replacement)
+            else:
+                text = text.replace(clean_u, "")
 
     return text
 
@@ -412,7 +419,7 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
 
     knowledge_text = f"HAS_DEVICE_INFO: {has_device_info}\nDETECTED_MODEL: {detected_model}\nDETECTED_CATEGORY: {detected_category}\nPLATFORM_INTENT: {platform_intent}\nACTION_INTENT: {action_intent}\n"
     for score, tab, row in top_matches:
-        knowledge_text += f"\n=== DỮ LIỆU THUỘC TAB [{tab}] ===\n"
+        knowledge_text += f"\n=== DỮ LIỆU CHÍNH XÁC TỪ SHEET [TAB: {tab}] ===\n"
         for key, value in row.items():
             if value: 
                 knowledge_text += f"- [{key}]: {value}\n"
@@ -420,41 +427,28 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     return knowledge_text, has_device_info, top_matches
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT
+# SYSTEM PROMPT BẮT BÚC CHÉP NGUYÊN VĂN TỪ SHEET VÀ CẤM TỰ TẠO LINK BIT.LY
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str, has_device_info: bool) -> str:
     return f"""
-Bạn là **Trợ Lý KHO Sapo** – Trợ lý AI cao cấp hỗ trợ kỹ thuật thiết bị Sapo.
-Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghiệp, hành văn tự nhiên.
+Bạn là **Trợ Lý KHO Sapo** – Trợ lý AI hỗ trợ kỹ thuật Sapo. Nhiệm vụ duy nhất của bạn là trích xuất NGUYÊN VĂN các bước cài đặt từ KHO DỮ LIỆU GỐC.
 
 📌 PHÂN LOẠI THIẾT BỊ:
-- Máy in hóa đơn: SPR02, SPR01, K200L, K200U, A160M, A868, HPRT. (ĐẶC BIỆT: SPR02 LÀ MÁY IN HÓA ĐƠN).
+- Máy in hóa đơn: SPR02, SPR01, K200L, K200U, A160M, A868, HPRT. (SPR02 LÀ MÁY IN HÓA ĐƠN).
 - Máy in tem: SPL01, XP-350B, G8.
 
-🛑 BẮT BUỘC TRÍCH XUẤT NGUYÊN VĂN TỪ KHO DỮ LIỆU GỐC:
-1. Đọc nội dung ở mục `[Noi_Dung_Huong_Dan]` hoặc `[Cach_Khac_Phuc]` trong KHO DỮ LIỆU GỐC bên dưới và TRÍCH XUẤT ĐẦY ĐỦ NGUYÊN VĂN các bước thao tác ra câu trả lời.
-2. Nếu trong KHO DỮ LIỆU GỐC có chứa đường link http/https thực tế ở các trường `Link_Driver_Win`, `Link_Driver_Mac`, `Link_Video_Huong_Dan`, `Link_Anh_Truc_Tiep`, hãy dán ĐÚNG ĐƯỜNG LINK THỰC TẾ ĐÓ ra bài viết.
-3. TUYỆT ĐỐI KHÔNG xuất các thẻ ngoặc vuông mẫu kiểu [Link_Driver_Win] hay [Nội dung...]. Bạn phải điền nội dung thật và đường link URL thật từ KHO DỮ LIỆU GỐC vào!
+🛑 CÁC QUY TẮC CẤM TUYỆT ĐỐI (LUẬT THÉP):
+1. **CẤM TỰ BỊA LINK RÚT GỌN:** Tuyệt đối KHÔNG ĐƯỢC TỰ TẠO LINK dạng `bit.ly/...` hay `tinyurl.com/...`. Bạn CHỈ ĐƯỢC DÙNG chính xác các link bắt đầu bằng `https://` có trong KHO DỮ LIỆU GỐC bên dưới.
+2. **CẤM TỰ BỊA BƯỚC CONTROL PANEL:** Tuyệt đối KHÔNG TỰ VIẾT các bước cài đặt chung chung như "Control Panel -> Devices and Printers". Bạn BẮT BUỘC PHẢI CHÉP NGUYÊN VĂN toàn bộ nội dung hướng dẫn có trong ô `[Noi_Dung_Huong_Dan]` (bao gồm các bước chi tiết như chọn XP-80C, Check USB Port, cổng USB003...).
+3. **TRÍCH XUẤT ĐẦY ĐỦ LINK:** Dán nguyên văn link `Link_Driver_Win`, `Link_Driver_Mac`, `Link_Video_Huong_Dan`, `Link_Anh_Truc_Tiep` thực tế nếu có trong dữ liệu.
 
-🎯 BỘ QUY TẮC XỬ LÝ THEO TRƯỜNG HỢP:
+🎨 BỐ CỤC TRÌNH BÀY:
+- Dùng Icon sinh động ở đầu các dòng (💻, 🍏, 📱, 🛠️, 📌, 🎥, ⚠️).
+- In đậm tên bước và các từ khóa nút bấm.
 
-1. 🛑 KHI CHƯA CÓ MODEL MÁY CỤ THỂ VÀ CHƯA NÓI LOẠI MÁY (`HAS_DEVICE_INFO: False`):
-   - **BẮT BUỘC hỏi lại ngay 1 câu khoanh vùng phân loại máy:**
-     "Dạ, để em đưa ra hướng dẫn khắc phục chính xác nhất, anh/chị cho em hỏi mình đang sử dụng loại máy in nào ạ?
-      1. 🧾 **Máy in hóa đơn (In bill tính tiền):** Ví dụ SPR02, K200L, K200U, A160M...
-      2. 🏷️ **Máy in tem mã vạch (In tem dán sản phẩm):** Ví dụ SPL01, XP-350B, G8...
-      
-      Anh/chị cho em xin tên model cụ thể ghi trên máy để em gửi hướng dẫn chuẩn 100% cho mình nhé!"
-
-2. 🛑 KHI ĐÃ CÓ MODEL MÁY HOẶC NÓI RÕ LOẠI MÁY (`HAS_DEVICE_INFO: True`):
-   - Trích xuất 100% nội dung và link thực tế từ KHO DỮ LIỆU GỐC bên dưới.
-
-🧠 QUY TẮC DUY TRÌ BỐI CẢNH (Context Memory):
-   - Khi người dùng đã cung cấp tên model (VD: SPR02 hay K200L) ở các câu trước -> BẮT BUỘC phải giữ nguyên bối cảnh model đó cho toàn bộ các câu hỏi phía sau.
-
-🛑 LUẬT THÉP ĐỊNH DẠNG:
-- TUYỆT ĐỐI CẤM sử dụng mã LaTeX toán học (như $\\rightarrow$, $\\Rightarrow$). Dùng dấu mũi tên "➔" hoặc "->".
-- Không tự bịa bước Control Panel hay thao tác phần cứng nếu dữ liệu không có.
+🎯 XỬ LÝ THEO TRƯỜNG HỢP:
+1. NẾU `HAS_DEVICE_INFO: False`: Hỏi lại loại máy in (Hóa đơn hay Tem).
+2. NẾU `HAS_DEVICE_INFO: True`: Chép NGUYÊN VĂN toàn bộ các bước trong mục `[Noi_Dung_Huong_Dan]` hoặc `[Cach_Khac_Phuc]` bên dưới.
 
 ---
 
@@ -463,7 +457,7 @@ KHO DỮ LIỆU GỐC SAPO:
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI LLM
+# HÀM GỌI LLM CÓ TEMPERATURE = 0.0 ÉP AI KHÔNG SÁNG TẠO
 # ------------------------------------------------------------------------------
 async def call_llm_with_history(system_instruction: str, messages_list: list) -> str:
     messages_payload = [{"role": "system", "content": system_instruction}]
@@ -477,7 +471,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         payload = {
             "model": CEREBRAS_MODEL,
             "messages": messages_payload,
-            "temperature": 0.1,
+            "temperature": 0.0,
             "top_p": 0.9,
             "max_tokens": 2000
         }
@@ -502,7 +496,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         payload = {
             "systemInstruction": {"parts": [{"text": system_instruction}]},
             "contents": gemini_contents,
-            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2000}
+            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 2000}
         }
         try:
             res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
@@ -518,7 +512,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
     return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
 
 # ------------------------------------------------------------------------------
-# HÀM WRAPPER DÀNH CHO GOOGLE CHAT CÓ CHÂN TRANG MẸO NỔI BẬT SIÊU MỎNG
+# HÀM WRAPPER DÀNH CHO GOOGLE CHAT
 # ------------------------------------------------------------------------------
 def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) -> dict:
     clean_text = clean_thinking_process(text_message)
@@ -563,7 +557,7 @@ async def chat_stream(req: ChatRequest):
 
     async def generate_response_stream():
         ans = await call_llm_with_history(system_instruction, req.messages)
-        ans = replace_placeholders_with_real_data(ans, top_matches)
+        ans = enforce_real_sheet_urls(ans, top_matches)
         yield ans
 
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
@@ -628,11 +622,11 @@ async def google_chat_webhook(request: Request):
         system_instruction = build_smart_system_prompt(focused_knowledge, has_device_info)
 
         ai_response = await call_llm_with_history(system_instruction, GOOGLE_CHAT_HISTORY[space_id])
-        ai_response = replace_placeholders_with_real_data(ai_response, top_matches)
+        ai_response = enforce_real_sheet_urls(ai_response, top_matches)
 
         GOOGLE_CHAT_HISTORY[space_id].append({"role": "assistant", "text": ai_response})
 
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response, show_reset_note=True))
 
     except Exception:
-        return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏", show_reset_note=False))
+        return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhắn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏", show_reset_note=False))
