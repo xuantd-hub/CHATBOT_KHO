@@ -4,120 +4,154 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trợ Lý KHO - Hệ Thống Hỗ Trợ Kỹ Thuật Sapo</title>
+    
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- FontAwesome Icons -->
+    
+    <!-- Cấu hình Tailwind mở rộng theo Brand Guidelines v2.0 của Sapo -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        sapo: {
+                            blue: '#007AFF',      /* Màu chính (Dominant ~85%) */
+                            green: '#16D865',     /* Điểm nhấn (Accent ~15%) */
+                            berkeley: '#0F1437',  /* Nền đậm chính */
+                            graphite: '#060C23',  /* Nền đậm tối nhất */
+                            offblue: '#F0F4F9',   /* Nền sáng neutral */
+                            polynesian: '#004FA4',/* Secondary Blue */
+                            dodger: '#0196FF'     /* Secondary Light Blue */
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- FontAwesome Icons & Google Fonts Inter -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Google Fonts Inter -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
     <!-- Marked.js render Markdown -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
     <style>
         body { font-family: 'Inter', sans-serif; }
         #chat-box { scroll-behavior: smooth; }
-	/* Tìm đoạn .markdown-body trong thẻ <style> và thêm 	các dòng dưới đây */
-	.markdown-body {
-    		word-break: break-word;
-    		overflow-wrap: anywhere;
-	}
 
-	.markdown-body a {
-   		 word-break: break-all;
-	}
+        /* Style Markdown theo chuẩn Typography Sapo (Left aligned, no text shadows) */
+        .markdown-body {
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            text-align: left;
+        }
+
+        .markdown-body a {
+            word-break: break-all;
+            color: #007AFF;
+            font-weight: 600;
+            text-decoration: underline;
+        }
+
         .markdown-body p { margin-bottom: 0.6rem; line-height: 1.6; }
         .markdown-body ul, .markdown-body ol { margin-left: 1.25rem; margin-bottom: 0.6rem; }
         .markdown-body ul { list-style-type: disc; }
         .markdown-body ol { list-style-type: decimal; }
         .markdown-body li { margin-bottom: 0.25rem; }
-        .markdown-body img { max-width: 100%; border-radius: 0.75rem; margin: 0.5rem 0; border: 1px solid #e2e8f0; }
+        .markdown-body img { max-width: 100%; border-radius: 0.75rem; margin: 0.5rem 0; border: 1px solid #E2E8F0; }
         
-        /* Chỉnh CSS Bảng để nếu AI xuất bảng sẽ hiển thị rất đẹp */
         .markdown-body table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; font-size: 0.85rem; }
-        .markdown-body th, .markdown-body td { border: 1px solid #cbd5e1; padding: 0.6rem; text-align: left; }
-        .markdown-body th { background-color: #f1f5f9; font-weight: 600; color: #1e293b; }
+        .markdown-body th, .markdown-body td { border: 1px solid #CBD5E1; padding: 0.6rem; text-align: left; }
+        .markdown-body th { background-color: #F0F4F9; font-weight: 600; color: #0F1437; }
 
         .dot-flashing {
             position: relative;
             width: 6px; height: 6px; border-radius: 5px;
-            background-color: #6366f1; color: #6366f1;
+            background-color: #007AFF; color: #007AFF;
             animation: dot-flashing 0.8s infinite linear alternate;
             animation-delay: 0.4s;
         }
         .dot-flashing::before, .dot-flashing::after {
             content: ""; display: inline-block; position: absolute; top: 0;
             width: 6px; height: 6px; border-radius: 5px;
-            background-color: #6366f1; color: #6366f1;
+            background-color: #007AFF; color: #007AFF;
         }
         .dot-flashing::before { left: -10px; animation: dot-flashing 0.8s infinite alternate; animation-delay: 0s; }
         .dot-flashing::after { left: 10px; animation: dot-flashing 0.8s infinite alternate; animation-delay: 0.8s; }
         @keyframes dot-flashing {
-            0% { background-color: #6366f1; }
-            50%, 100% { background-color: #e0e7ff; }
+            0% { background-color: #007AFF; }
+            50%, 100% { background-color: #9ECCFF; }
         }
     </style>
 </head>
-<body class="bg-slate-50 h-screen flex flex-col antialiased text-slate-800">
+<body class="bg-sapo-offblue h-screen flex flex-col antialiased text-slate-800">
 
-    <!-- HEADER PRO -->
-    <header class="bg-indigo-950 text-white px-5 py-3.5 flex items-center justify-between shadow-md border-b border-indigo-900/50">
+    <!-- HEADER BRANDING SAPO (Berkeley Blue Background & Sapo Blue Accent) -->
+    <header class="bg-sapo-berkeley text-white px-5 py-3.5 flex items-center justify-between border-b border-sapo-graphite">
         <div class="flex items-center space-x-3.5">
-            <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-400 text-indigo-950 flex items-center justify-center font-black text-sm shadow-md border border-amber-300/60">
+            <!-- Sapo Box Icon Motif -->
+            <div class="w-10 h-10 rounded-2xl bg-sapo-blue text-white flex items-center justify-center font-bold text-sm">
                 KHO
             </div>
             <div>
                 <h1 class="font-bold text-base leading-tight flex items-center gap-2">
-                    Trợ Lý KHO <span class="text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30">Pro Active</span>
+                    Trợ Lý KHO <span class="text-[10px] bg-sapo-green/20 text-sapo-green font-semibold px-2 py-0.5 rounded-full border border-sapo-green/30">Pro Active</span>
                 </h1>
-                <p class="text-xs text-indigo-300/80 font-normal">Hỗ trợ chẩn đoán sự cố & kỹ thuật Sapo</p>
+                <p class="text-xs text-slate-300 font-normal">Hỗ trợ chẩn đoán sự cố & kỹ thuật Sapo</p>
             </div>
         </div>
 
         <div class="flex items-center space-x-3">
             <div class="hidden md:flex flex-col text-right">
-                <span id="sync-status" class="text-[11px] text-emerald-400 font-medium flex items-center gap-1.5 justify-end">
-                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Đồng bộ tự động
+                <span id="sync-status" class="text-[11px] text-sapo-green font-medium flex items-center gap-1.5 justify-end">
+                    <span class="w-2 h-2 rounded-full bg-sapo-green animate-pulse"></span> Đồng bộ tự động
                 </span>
-                <span id="last-sync-time" class="text-[10px] text-indigo-300/70">Sẵn sàng</span>
+                <span id="last-sync-time" class="text-[10px] text-slate-300">Sẵn sàng</span>
             </div>
 
-            <button onclick="manualReloadSheetData()" id="btn-reload" class="bg-indigo-800/80 hover:bg-indigo-700 text-indigo-100 px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all border border-indigo-700/60 shadow-sm active:scale-95">
-                <i class="fa-solid fa-rotate text-amber-400" id="icon-reload"></i> 
-                <span>Nạp Sheet</span>
+            <button onclick="manualReloadSheetData()" id="btn-reload" class="bg-sapo-polynesian hover:bg-sapo-blue text-white px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all">
+                <i class="fa-solid fa-rotate text-sapo-green" id="icon-reload"></i> 
+                <span>Cập nhật dữ liệu trên từ Google Sheet</span>
             </button>
 
-            <div class="bg-indigo-900/90 p-1 rounded-xl flex items-center text-xs border border-indigo-800">
-                <button id="btn-role-customer" onclick="setRole('Khach_Hang')" class="px-3 py-1.5 rounded-lg font-medium transition-all bg-indigo-600 text-white shadow-sm">
+            <!-- Role Selector với Sapo Blue & Sapo Green Active States -->
+            <div class="bg-sapo-graphite p-1 rounded-xl flex items-center text-xs border border-sapo-berkeley">
+                <button id="btn-role-customer" onclick="setRole('Khach_Hang')" class="px-3 py-1.5 rounded-lg font-medium transition-all bg-sapo-blue text-white">
                     <i class="fa-solid fa-user mr-1"></i> Khách hàng
                 </button>
-                <button id="btn-role-sale" onclick="openSaleAuthModal()" class="px-3 py-1.5 rounded-lg font-medium transition-all text-indigo-300 hover:text-white">
+                <button id="btn-role-sale" onclick="openSaleAuthModal()" class="px-3 py-1.5 rounded-lg font-medium transition-all text-slate-300 hover:text-white">
                     <i class="fa-solid fa-user-shield mr-1"></i> Sale Nội Bộ
                 </button>
             </div>
         </div>
     </header>
 
-    <!-- TRA NHANH -->
-    <div class="bg-white border-b border-slate-200/80 px-5 py-2.5 flex items-center gap-2 overflow-x-auto text-xs whitespace-nowrap scrollbar-none shadow-2xs">
-        <span class="text-slate-400 font-semibold flex items-center gap-1.5 mr-1"><i class="fa-solid fa-bolt text-amber-500"></i> Tra nhanh:</span>
-        <button onclick="quickAsk('Máy in K200L không in được')" class="bg-slate-100/80 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3.5 py-1.5 rounded-xl border border-slate-200/60 transition-all font-medium">🖨️ K200L không in</button>
-        <button onclick="quickAsk('Cách xem tem nhãn tra mã máy')" class="bg-slate-100/80 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3.5 py-1.5 rounded-xl border border-slate-200/60 transition-all font-medium">🏷️ Cách xem mã máy</button>
-        <button onclick="quickAsk('Máy in bị kẹt dao cắt')" class="bg-slate-100/80 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3.5 py-1.5 rounded-xl border border-slate-200/60 transition-all font-medium">✂️ Kẹt dao cắt</button>
-        <button onclick="quickAsk('Cài Driver máy in K200L')" class="bg-slate-100/80 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 px-3.5 py-1.5 rounded-xl border border-slate-200/60 transition-all font-medium">📥 Cài Driver K200L</button>
+    <!-- THANH TRA NHANH -->
+    <div class="bg-white border-b border-slate-200 px-5 py-2.5 flex items-center gap-2 overflow-x-auto text-xs whitespace-nowrap scrollbar-none">
+        <span class="text-slate-400 font-semibold flex items-center gap-1.5 mr-1"><i class="fa-solid fa-bolt text-sapo-blue"></i> Tra nhanh:</span>
+        <button onclick="quickAsk('Máy in K200L không in được')" class="bg-sapo-offblue hover:bg-sapo-blue/10 text-slate-700 hover:text-sapo-blue px-3.5 py-1.5 rounded-xl border border-slate-200 transition-all font-medium">🖨️ K200L không in</button>
+        <button onclick="quickAsk('Cách xem tem nhãn tra mã máy')" class="bg-sapo-offblue hover:bg-sapo-blue/10 text-slate-700 hover:text-sapo-blue px-3.5 py-1.5 rounded-xl border border-slate-200 transition-all font-medium">🏷️ Cách xem mã máy</button>
+        <button onclick="quickAsk('Máy in bị kẹt dao cắt')" class="bg-sapo-offblue hover:bg-sapo-blue/10 text-slate-700 hover:text-sapo-blue px-3.5 py-1.5 rounded-xl border border-slate-200 transition-all font-medium">✂️ Kẹt dao cắt</button>
+        <button onclick="quickAsk('Cài Driver máy in K200L')" class="bg-sapo-offblue hover:bg-sapo-blue/10 text-slate-700 hover:text-sapo-blue px-3.5 py-1.5 rounded-xl border border-slate-200 transition-all font-medium">📥 Cài Driver K200L</button>
     </div>
 
     <!-- KHUNG CHAT -->
     <main id="chat-box" class="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 max-w-4xl mx-auto w-full">
         <div class="flex items-start gap-3.5">
-            <div class="w-9 h-9 rounded-2xl bg-amber-500 text-indigo-950 flex items-center justify-center font-black text-xs flex-shrink-0 shadow-sm border border-amber-300">
+            <div class="w-9 h-9 rounded-2xl bg-sapo-blue text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
                 KHO
             </div>
-            <div class="bg-white p-4 md:p-5 rounded-3xl rounded-tl-xs border border-slate-200/80 shadow-sm max-w-2xl text-slate-800 text-sm leading-relaxed space-y-2">
-                <p class="font-bold text-indigo-950 text-base flex items-center gap-2">
+            <div class="bg-white p-4 md:p-5 rounded-3xl rounded-tl-xs border border-slate-200 max-w-2xl text-slate-800 text-sm leading-relaxed space-y-2">
+                <p class="font-bold text-sapo-berkeley text-base flex items-center gap-2">
                     Xin chào! Em là Trợ Lý KHO 👋
                 </p>
                 <p class="text-slate-600">Em hỗ trợ chẩn đoán sự cố, hướng dẫn cài đặt máy in hóa đơn, máy quét mã vạch, máy POS và khay đựng tiền Sapo.</p>
-                <div class="text-xs text-slate-500 bg-slate-50 p-3 rounded-2xl border border-slate-100 flex items-center gap-2 mt-2">
-                    <i class="fa-solid fa-circle-info text-indigo-500 text-sm"></i>
+                <div class="text-xs text-slate-500 bg-sapo-offblue p-3 rounded-2xl border border-slate-200 flex items-center gap-2 mt-2">
+                    <i class="fa-solid fa-circle-info text-sapo-blue text-sm"></i>
                     <span>Dữ liệu hướng dẫn kỹ thuật được đồng bộ 100% từ Google Sheet kho Sapo. Hỗ trợ 24/7.</span>
                 </div>
             </div>
@@ -125,56 +159,57 @@
     </main>
 
     <!-- THANH NHẬP -->
-    <footer class="bg-white border-t border-slate-200/80 p-3.5 max-w-4xl mx-auto w-full">
+    <footer class="bg-white border-t border-slate-200 p-3.5 max-w-4xl mx-auto w-full">
         <form id="chat-form" onsubmit="sendMessage(event)" class="flex items-center gap-2.5">
             <input 
                 type="text" 
                 id="user-input" 
                 placeholder="Nhập triệu chứng lỗi, tên máy hoặc câu hỏi kỹ thuật..." 
-                class="flex-1 bg-slate-100/80 border border-slate-300/80 focus:border-indigo-600 focus:bg-white focus:outline-none px-4 py-3 rounded-2xl text-sm transition-all shadow-inner"
+                class="flex-1 bg-sapo-offblue border border-slate-300 focus:border-sapo-blue focus:bg-white focus:outline-none px-4 py-3 rounded-2xl text-sm transition-all"
                 required autocomplete="off"
             />
             <button 
                 type="submit" 
                 id="btn-send"
-                class="bg-indigo-700 hover:bg-indigo-800 text-white font-semibold px-6 py-3 rounded-2xl text-sm flex items-center gap-2 transition-all shadow-md active:scale-95"
+                class="bg-sapo-blue hover:bg-sapo-polynesian text-white font-semibold px-6 py-3 rounded-2xl text-sm flex items-center gap-2 transition-all active:scale-95"
             >
                 <span>Gửi</span> <i class="fa-solid fa-paper-plane text-xs"></i>
             </button>
         </form>
     </footer>
 
-    <!-- MODAL SALE -->
-    <div id="sale-auth-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
-        <div class="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 border border-slate-100">
+    <!-- MODAL SALE (Chuẩn Sentence Case, Sapo Theme) -->
+    <div id="sale-auth-modal" class="fixed inset-0 bg-sapo-graphite/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-3xl p-6 max-w-sm w-full space-y-4 border border-slate-100">
             <div class="text-center space-y-1">
-                <div class="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto text-xl">
+                <div class="w-12 h-12 bg-sapo-offblue text-sapo-blue rounded-2xl flex items-center justify-center mx-auto text-xl">
                     <i class="fa-solid fa-user-shield"></i>
                 </div>
-                <h3 class="font-bold text-slate-800 text-base">Xác minh Sale Nội Bộ</h3>
-                <p class="text-xs text-slate-500">Nhập Email Sapo & Mật khẩu để mở quyền Sale</p>
+                <h3 class="font-bold text-sapo-berkeley text-base">Xác minh Sale nội bộ</h3>
+                <p class="text-xs text-slate-500">Nhập Email Sapo và mật khẩu để mở quyền Sale</p>
             </div>
             
-            <div class="space-y-3">
+            <div class="space-y-3 text-left">
                 <div>
-                    <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">Email Sapo (*)</label>
-                    <input type="email" id="sale-email-input" placeholder="tennhanvien@sapo.vn" class="w-full text-sm bg-slate-100 border border-slate-300 focus:border-indigo-500 focus:bg-white focus:outline-none px-3.5 py-2.5 rounded-xl" />
+                    <label class="text-xs font-semibold text-slate-600 block mb-1">Email Sapo (*)</label>
+                    <input type="email" id="sale-email-input" placeholder="tennhanvien@sapo.vn" class="w-full text-sm bg-sapo-offblue border border-slate-300 focus:border-sapo-blue focus:bg-white focus:outline-none px-3.5 py-2.5 rounded-xl" />
                 </div>
                 <div>
-                    <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">Mật khẩu Sale (*)</label>
-                    <input type="password" id="sale-pin-input" placeholder="Mật khẩu nội bộ" class="w-full text-sm bg-slate-100 border border-slate-300 focus:border-indigo-500 focus:bg-white focus:outline-none px-3.5 py-2.5 rounded-xl" />
+                    <label class="text-xs font-semibold text-slate-600 block mb-1">Mật khẩu Sale (*)</label>
+                    <input type="password" id="sale-pin-input" placeholder="Mật khẩu nội bộ" class="w-full text-sm bg-sapo-offblue border border-slate-300 focus:border-sapo-blue focus:bg-white focus:outline-none px-3.5 py-2.5 rounded-xl" />
                 </div>
             </div>
 
             <div class="flex gap-2 pt-1">
-                <button onclick="closeSaleModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-2xl text-xs font-semibold">Hủy</button>
-                <button onclick="verifySalePin()" id="btn-submit-sale" class="flex-1 bg-indigo-700 hover:bg-indigo-800 text-white py-2.5 rounded-2xl text-xs font-semibold shadow-md flex items-center justify-center gap-1">
+                <button onclick="closeSaleModal()" class="flex-1 bg-sapo-offblue hover:bg-slate-200 text-slate-700 py-2.5 rounded-2xl text-xs font-semibold">Hủy</button>
+                <button onclick="verifySalePin()" id="btn-submit-sale" class="flex-1 bg-sapo-blue hover:bg-sapo-polynesian text-white py-2.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-1">
                     <span>Xác nhận</span>
                 </button>
             </div>
         </div>
     </div>
 
+    <!-- LOGIC JAVASCRIPT GIỮ NGUYÊN 100% -->
     <script>
         const BACKEND_URL = "https://chatbot-kho-backend-1028817147588.asia-southeast1.run.app";
         let currentRole = "Khach_Hang";
@@ -189,7 +224,7 @@
         renderer.link = function(href, title, text) {
             const linkUrl = (typeof href === 'object') ? href.href : href;
             const linkText = (typeof href === 'object') ? href.text : text;
-            return `<a href="${linkUrl}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 underline font-semibold hover:text-indigo-800 transition-colors inline-flex items-center gap-1">${linkText} <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i></a>`;
+            return `<a href="${linkUrl}" target="_blank" rel="noopener noreferrer" class="text-sapo-blue underline font-semibold hover:text-sapo-polynesian transition-colors inline-flex items-center gap-1">${linkText} <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i></a>`;
         };
         marked.setOptions({ renderer: renderer });
 
@@ -224,12 +259,12 @@
             const btnSale = document.getElementById("btn-role-sale");
 
             if (role === 'Khach_Hang') {
-                btnCustomer.className = "px-3 py-1.5 rounded-lg font-medium transition-all bg-indigo-600 text-white shadow-sm";
-                btnSale.className = "px-3 py-1.5 rounded-lg font-medium transition-all text-indigo-300 hover:text-white";
+                btnCustomer.className = "px-3 py-1.5 rounded-lg font-medium transition-all bg-sapo-blue text-white";
+                btnSale.className = "px-3 py-1.5 rounded-lg font-medium transition-all text-slate-300 hover:text-white";
                 localStorage.removeItem("sapo_user_role");
             } else {
-                btnSale.className = "px-3 py-1.5 rounded-lg font-medium transition-all bg-amber-600 text-white shadow-sm";
-                btnCustomer.className = "px-3 py-1.5 rounded-lg font-medium transition-all text-indigo-300 hover:text-white";
+                btnSale.className = "px-3 py-1.5 rounded-lg font-medium transition-all bg-sapo-green text-sapo-berkeley font-semibold";
+                btnCustomer.className = "px-3 py-1.5 rounded-lg font-medium transition-all text-slate-300 hover:text-white";
                 localStorage.setItem("sapo_user_role", "Sale");
             }
         }
@@ -290,7 +325,7 @@
             const chatBox = document.getElementById("chat-box");
             chatBox.insertAdjacentHTML("beforeend", `
                 <div class="flex items-start gap-3 justify-end">
-                    <div class="bg-indigo-700 text-white p-4 rounded-3xl rounded-tr-xs shadow-sm max-w-xl text-sm leading-relaxed">${escapeHtml(text)}</div>
+                    <div class="bg-sapo-blue text-white p-4 rounded-3xl rounded-tr-xs max-w-xl text-sm leading-relaxed">${escapeHtml(text)}</div>
                     <div class="w-9 h-9 rounded-2xl bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs flex-shrink-0">Bạn</div>
                 </div>
             `);
@@ -300,14 +335,14 @@
             const aiMsgId = "ai-msg-" + Date.now();
             chatBox.insertAdjacentHTML("beforeend", `
                 <div class="flex items-start gap-3.5">
-                    <div class="w-9 h-9 rounded-2xl bg-amber-500 text-indigo-950 flex items-center justify-center font-black text-xs flex-shrink-0 shadow-sm border border-amber-300">KHO</div>
-                    <div class="bg-white p-4 md:p-5 rounded-3xl rounded-tl-xs border border-slate-200/80 shadow-sm max-w-2xl text-slate-800 text-sm leading-relaxed space-y-2 relative group w-full">
+                    <div class="w-9 h-9 rounded-2xl bg-sapo-blue text-white flex items-center justify-center font-bold text-xs flex-shrink-0">KHO</div>
+                    <div class="bg-white p-4 md:p-5 rounded-3xl rounded-tl-xs border border-slate-200 max-w-2xl text-slate-800 text-sm leading-relaxed space-y-2 relative group w-full">
                         <div id="${aiMsgId}" class="markdown-body">
                             <div class="flex items-center gap-3 py-1 text-slate-400 font-medium text-xs">
                                 <div class="dot-flashing ml-2"></div><span class="ml-3">Đang phân tích 100% kho tri thức...</span>
                             </div>
                         </div>
-                        <button onclick="copyToClipboard('${aiMsgId}')" class="opacity-0 group-hover:opacity-100 transition-opacity absolute top-3 right-3 bg-slate-100 hover:bg-indigo-100 text-slate-600 hover:text-indigo-700 text-xs px-2.5 py-1 rounded-lg border border-slate-200 flex items-center gap-1 shadow-2xs"><i class="fa-regular fa-copy"></i> Copy</button>
+                        <button onclick="copyToClipboard('${aiMsgId}')" class="opacity-0 group-hover:opacity-100 transition-opacity absolute top-3 right-3 bg-sapo-offblue hover:bg-sapo-blue/10 text-slate-600 hover:text-sapo-blue text-xs px-2.5 py-1 rounded-lg border border-slate-200 flex items-center gap-1"><i class="fa-regular fa-copy"></i> Copy</button>
                     </div>
                 </div>
             `);
