@@ -445,7 +445,7 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
 
 🛠️ QUY TẮC BẮT BUỘC KHI XỬ LÝ LỖI KỸ THUẬT (TAB 1_THIET_BI_VA_LOI):
 1. Khi dữ liệu thuộc Tab `1_THIET_BI_VA_LOI`, AI **BẮT BUỘC trích xuất CHÍNH XÁC NGUYÊN VĂN** nội dung hướng dẫn ở cột `Cach_Khac_Phuc`.
-2. Dán ĐẦY ĐỦ các đường link hình ảnh minh họa (`Link_Anh_Truc_Tiep`) và video hướng dẫn (`Link_Video_HD`) nếu có trong Sheet.
+2. Dán ĐẦY ĐỦ các đường link hình ảnh minh họa (`Link_Anh_Truc_Tiep`) và video hướng dẫn (`Link_Video_Huong_Dan`) nếu có trong Sheet.
 3. TUYỆT ĐỐI KHÔNG tự trả lời lý thuyết chung chung mà bỏ qua các link hình ảnh minh họa thực tế có trong Kho dữ liệu!
 
 🛑 QUY TẮC ÉP TÁCH DÒNG ĐỘC LẬP CHO TẤT CẢ LINK (SEPARATED LINK RULE):
@@ -486,7 +486,7 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
      - 📄 **Tài liệu / Bài viết hướng dẫn:** <Link trong Sheet>
      - 💻 **Link Tải Driver Windows:** <Link_Driver_Win trong Sheet>
      - 🍏 **Link Tải Driver Mac:** <Link_Driver_Mac trong Sheet>
-     - 🎥 **Video Hướng Dẫn:** <Link_Video_Huong_Dan / Link_Video_HD trong Sheet>
+     - 🎥 **Video Hướng Dẫn:** <Link_Video_Huong_Dan trong Sheet>
      - 🖼️ **Hình ảnh minh họa:** <Link_Anh_Truc_Tiep trong Sheet>
      - ⚠️ **Lưu ý quan trọng:** <Luu_y trong Sheet>
 
@@ -587,6 +587,52 @@ def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) 
         }
     }
 
+# ------------------------------------------------------------------------------
+# HÀM LẤY MẬT KHẨU SALE ĐỘNG TỪ TAB 0_CAI_DAT TRÊN GOOGLE SHEET
+# ------------------------------------------------------------------------------
+def get_sale_passcode() -> str:
+    cai_dat_records = RAM_CACHE.get(TAB_CONFIG, [])
+    if cai_dat_records:
+        for row in cai_dat_records:
+            row_text = " ".join(str(v).lower() for v in row.values())
+            # Tìm dòng chứa từ khóa mật khẩu Sale
+            if any(kw in row_text for kw in ["mat_khau", "passcode", "pin", "sale"]):
+                for k, v in row.items():
+                    val_str = str(v).strip()
+                    # Lấy giá trị ô không phải tên cột định danh
+                    if val_str and not any(key_kw in str(k).lower() for key_kw in ["ten", "key", "loai"]):
+                        return val_str
+
+    # Dự phòng mật khẩu mặc định nếu trên Sheet chưa nhập
+    return os.getenv("SALE_PASSCODE", "sapo123").strip()
+
+# ------------------------------------------------------------------------------
+# CLASS & ENDPOINT XÁC THỰC SALE NỘI BỘ DÙNG MẬT KHẨU TỪ SHEET
+# ------------------------------------------------------------------------------
+class VerifySaleRequest(BaseModel):
+    email: str
+    passcode: str
+
+@app.post("/verify-sale")
+async def verify_sale(req: VerifySaleRequest):
+    # 1. Kiểm tra đuôi Email @sapo.vn
+    if not req.email.lower().strip().endswith("@sapo.vn"):
+        return {"success": False, "message": "Email bắt buộc phải có đuôi @sapo.vn!"}
+    
+    # 2. Đọc mật khẩu thực tế từ RAM Cache (lấy từ Tab 0_CAI_DAT)
+    current_passcode = get_sale_passcode()
+    
+    # 3. So sánh mật khẩu
+    if req.passcode.strip() == current_passcode:
+        return {
+            "success": True, 
+            "message": f"Xác thực thành công! Xin chào Sale Sapo ({req.email})."
+        }
+    else:
+        return {
+            "success": False, 
+            "message": "Mật khẩu Sale nội bộ không chính xác!"
+        }
 # ------------------------------------------------------------------------------
 # 1. CỔNG WEB CHAT (/chat)
 # ------------------------------------------------------------------------------
