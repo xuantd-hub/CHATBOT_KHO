@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo High-Precision & Elegant Engine", version="4600.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Strict Sheet Engine", version="4700.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -115,8 +115,8 @@ def get_auto_reset_minutes() -> int:
 def health_check():
     return {
         "status": "healthy", 
-        "version": "4600.0", 
-        "engine": "High-Precision & Elegant Engine",
+        "version": "4700.0", 
+        "engine": "Strict Sheet Engine",
         "auto_reset_minutes": get_auto_reset_minutes(),
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
@@ -133,7 +133,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# LÀM SẠCH VĂN BẢN VÀ KHÔI PHỤC LINK NGUYÊN BẢN CHÍNH XÁC TỪ SHEET
+# LÀM SẠCH VĂN BẢN VÀ LỌC XÓA TỰ ĐỘNG LINK GIẢ LẬP
 # ------------------------------------------------------------------------------
 def clean_thinking_process(text: str) -> str:
     if "Here's a thinking process:" in text:
@@ -145,78 +145,45 @@ def clean_thinking_process(text: str) -> str:
     return text.strip()
 
 def restore_exact_urls(text: str, top_matches: list) -> str:
-    # 1. Xóa triệt để các cụm "(Ví dụ)" hoặc "(ví dụ)"
     text = re.sub(r'\s*\(\s*[Vv]í dụ:?\s*\)', '', text)
 
-    if not top_matches:
-        return text
-
+    url_regex = re.compile(r'https?://[^\s\)\>\]"\'\}]+')
+    all_real_urls = []
     real_video_urls = []
     real_doc_urls = []
-    real_win_urls = []
-    real_mac_urls = []
-    all_real_urls = []
 
-    url_regex = re.compile(r'https?://[^\s\)\>\]"\'\}]+')
+    if top_matches:
+        for score, tab, row in top_matches:
+            for k, v in row.items():
+                val_str = str(v).strip()
+                extracted = url_regex.findall(val_str)
+                for u in extracted:
+                    clean_u = u.rstrip('.,;')
+                    if clean_u not in all_real_urls:
+                        all_real_urls.append(clean_u)
+                    if "youtube.com" in clean_u or "youtu.be" in clean_u:
+                        if clean_u not in real_video_urls: real_video_urls.append(clean_u)
+                    else:
+                        if clean_u not in real_doc_urls: real_doc_urls.append(clean_u)
 
-    # 2. Bóc tách toàn bộ URL thực tế từ ô dữ liệu Google Sheet
-    for score, tab, row in top_matches:
-        for k, v in row.items():
-            val_str = str(v).strip()
-            extracted = url_regex.findall(val_str)
-            for u in extracted:
-                clean_u = u.rstrip('.,;')
-                if clean_u not in all_real_urls:
-                    all_real_urls.append(clean_u)
-
-                key_lower = str(k).lower()
-                if "win" in key_lower:
-                    if clean_u not in real_win_urls: real_win_urls.append(clean_u)
-                elif "mac" in key_lower:
-                    if clean_u not in real_mac_urls: real_mac_urls.append(clean_u)
-                elif "video" in key_lower or "hd" in key_lower or "youtube.com" in clean_u or "youtu.be" in clean_u:
-                    if clean_u not in real_video_urls: real_video_urls.append(clean_u)
-                else:
-                    if clean_u not in real_doc_urls: real_doc_urls.append(clean_u)
-
-    # 3. Nếu dữ liệu gốc không có link nào, xóa các dòng link giả lập
-    if not all_real_urls:
-        text = re.sub(r'-\s*(🎥|📄|💻|🍏|🖼️)?\s*[^:\n]+:\s*https?://[^\s\)\>\]]+\n?', '', text)
-        return text
-
-    # 4. Thay thế tất cả các link mẫu thành LINK THẬT TỪ SHEET
     found_urls = url_regex.findall(text)
-    video_idx = 0
-    doc_idx = 0
-
     for found_url in found_urls:
         clean_found = found_url.rstrip('.,;')
-
-        is_fake = (clean_found not in all_real_urls) or any(pkg in clean_found for pkg in ["1S_", "S-S-S", "Driver_Win", "Guide", "Sapo_SPR", "sapo.vn/huong-dan"])
+        is_fake = (clean_found not in all_real_urls) or any(pkg in clean_found.lower() for pkg in ["example", "sapo.vn/huong-dan", "driver_win", "driver_mac", "1s_", "s-s-s"])
 
         if is_fake:
-            replacement = None
-            clean_lower = clean_found.lower()
-
-            if "youtube" in clean_lower or "video" in clean_lower or "hd" in clean_lower:
+            if "youtube" in clean_found.lower() or "video" in clean_found.lower():
                 if real_video_urls:
-                    replacement = real_video_urls[video_idx % len(real_video_urls)]
-                    video_idx += 1
-                elif all_real_urls:
-                    replacement = all_real_urls[0]
-            elif "win" in clean_lower:
-                replacement = real_win_urls[0] if real_win_urls else (real_doc_urls[0] if real_doc_urls else all_real_urls[0])
-            elif "mac" in clean_lower:
-                replacement = real_mac_urls[0] if real_mac_urls else (real_doc_urls[0] if real_doc_urls else all_real_urls[0])
+                    text = text.replace(clean_found, real_video_urls[0])
+                else:
+                    text = re.sub(r'^[^\n]*' + re.escape(clean_found) + r'[^\n]*\n?', '', text, flags=re.MULTILINE)
             else:
                 if real_doc_urls:
-                    replacement = real_doc_urls[doc_idx % len(real_doc_urls)]
-                    doc_idx += 1
+                    text = text.replace(clean_found, real_doc_urls[0])
+                elif all_real_urls:
+                    text = text.replace(clean_found, all_real_urls[0])
                 else:
-                    replacement = all_real_urls[0]
-
-            if replacement:
-                text = text.replace(clean_found, replacement)
+                    text = re.sub(r'^[^\n]*' + re.escape(clean_found) + r'[^\n]*\n?', '', text, flags=re.MULTILINE)
 
     return text
 
@@ -265,7 +232,6 @@ def extract_device_info_from_history(messages: list) -> tuple:
 
     latest_txt = user_msgs[-1].lower()
 
-    # 1. Quét tên Model và Category trong CÂU MỚI NHẤT
     latest_model = ""
     for dev in device_models:
         if dev in latest_txt:
@@ -283,7 +249,6 @@ def extract_device_info_from_history(messages: list) -> tuple:
                 latest_category = "máy in tem"
                 break
 
-    # 2. Quét tên Model và Category trong LỊCH SỬ CŨ
     history_model = ""
     history_category = ""
     for m in reversed(user_msgs[:-1]):
@@ -303,7 +268,6 @@ def extract_device_info_from_history(messages: list) -> tuple:
                     history_category = "máy in tem"
                     break
 
-    # LOGIC XỬ LÝ BỐI CẢNH
     if latest_model:
         cat = latest_category or history_category or ""
         return latest_model, cat
@@ -460,72 +424,45 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     return knowledge_text, has_device_info, top_matches
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT (CÓ ĐẦY ĐỦ ICON TRÌNH BÀY ĐẸP & CHUẨN KHO SAPO)
+# SYSTEM PROMPT (ÉP BÁM SÁT 100% NỘI DUNG SHEET & KHÔNG BỊA BƯỚC/LINK)
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str, has_device_info: bool) -> str:
     return f"""
 Bạn là **Trợ Lý KHO Sapo** – Trợ lý AI cao cấp, có tư duy logic sâu sắc và am hiểu kỹ thuật thiết bị Sapo.
 Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghiệp, hành văn tự nhiên, rõ ràng.
 
-🎨 QUY TẮC BỐ CỤC TRÌNH BÀY ĐẸP MẮT & DỄ ĐỌC (PRESENTATION & ICONS RULE):
-- **Sử dụng Icon/Emoji sinh động** ở đầu các tiêu đề và từng bước thao tác (VD: 💻, 🍏, 📱, 🛠️, 📌, ✅, 👉, 📄, 🎥, ⚠️, 📞).
-- **Chia nhỏ đoạn văn thoáng đãng**, dùng danh sách gạch đầu dòng (Bullet points).
-- **In đậm các từ khóa quan trọng**, tên nút bấm, tên bước (VD: **Bước 1: Tải Driver**, **Link Driver Mac:**).
+🛑 LUẬT NGUYÊN TẮC TỐI CAO (MANDATORY RULE):
+1. TOÀN BỘ NỘI DUNG NGUYÊN VĂN CÁC BƯỚC HƯỚNG DẪN VÀ ĐƯỜNG LINK (https://...) BẮT BUỘC PHẢI TRÍCH XUẤT 100% TỪ KHO DỮ LIỆU BÊN DƯỚI.
+2. TUYỆT ĐỐI KHÔNG TỰ BỊA RA CÁC BƯỚC CÀI ĐẶT/XỬ LÝ LỖI KHÔNG CÓ TRONG KHO DỮ LIỆU.
+3. TUYỆT ĐỐI KHÔNG TỰ BỊA LINK KHÔNG CÓ TRONG SHEET (như sapo.vn/huong-dan..., youtube.com/watch?v=example...).
+4. TUYỆT ĐỐI KHÔNG TỰ Ý CHÈN TỪ "(Ví dụ)" HOẶC "(ví dụ)" VÀO CÂU TRẢ LỜI.
+5. Nếu trong Kho dữ liệu KHÔNG CÓ đường link nào, TUYỆT ĐỐI KHÔNG tự tạo dòng dán link hay video.
 
-🛠️ QUY TẮC BẮT BUỘC KHI XỬ LÝ LỖI KỸ THUẬT (TAB 1_THIET_BI_VA_LOI):
-1. Khi dữ liệu thuộc Tab `1_THIET_BI_VA_LOI`, AI **BẮT BUỘC trích xuất CHÍNH XÁC NGUYÊN VĂN** nội dung hướng dẫn ở cột `Cach_Khac_Phuc`.
-2. Dán ĐẦY ĐỦ các đường link hình ảnh minh họa (`Link_Anh_Truc_Tiep`) và video hướng dẫn (`Link_Video_HD`) nếu có trong Sheet.
-3. TUYỆT ĐỐI KHÔNG tự trả lời lý thuyết chung chung mà bỏ qua các link hình ảnh minh họa thực tế có trong Kho dữ liệu!
+🎨 QUY TẮC BỐ CỤC TRÌNH BÀY ĐẸP MẮT (PRESENTATION & ICONS RULE):
+- Trình bày bài viết thoáng đãng, chia nhỏ dòng rõ ràng.
+- Đặt các Icon/Emoji sinh động ở đầu các tiêu đề, từng Cách hoặc từng Bước thao tác (VD: 🛠️, 📌, 💡, 💻, 🍏, 📱, 🎥, 📄, ⚠️, 📞).
+- In đậm các từ khóa quan trọng và tên bước thao tác.
+- BẮT BUỘC mỗi đường link URL thực tế (https://...) phải nằm trên một dòng riêng biệt bắt đầu bằng dấu gạch đầu dòng (`- `).
 
-🛑 QUY TẮC ÉP TÁCH DÒNG ĐỘC LẬP CHO TẤT CẢ LINK (SEPARATED LINK RULE):
-- BẮT BUỘC mỗi đường link URL, hình ảnh hoặc video hướng dẫn phải nằm trên một dòng riêng biệt bắt đầu bằng dấu gạch đầu dòng (`- `).
-- TUYỆT ĐỐI CẤM dán 2 icon hay 2 link trên cùng 1 dòng ngang!
+🎯 QUY TẮC XỬ LÝ THEO LOẠI THÔNG TIN:
 
-📌 QUY TẮC BẮT BUỘC VỀ CHÍNH SÁCH BẢO HÀNH & TỔNG ĐÀI (POLICY RULE):
-1. Các thông tin nằm trong Tab `3_CHINH_SACH_SAPO` hoặc `4_DU_LIEU_NOI_BO` (như Thời hạn bảo hành, Điều kiện bảo hành, Số tổng đài 1900 6750, Địa chỉ...) là **CHÍNH SÁCH CHUNG ÁP DỤNG CHO TẤT CẢ THIẾT BỊ SAPO** (bao gồm SPR02, SPL01, K200L,...).
-2. Khi người dùng hỏi về Bảo hành hay Tổng đài hỗ trợ cho một thiết bị cụ thể (VD: SPR02), AI **BẮT BUỘC sử dụng ngay thông tin chính sách chung trong Kho dữ liệu để trả lời trực tiếp**.
-3. **TUYỆT ĐỐI CẤM BÁO:** "Không có văn bản cụ thể về chính sách bảo hành cho từng thiết bị" hoặc "Không có thông tin chi tiết về số tổng đài".
-
-🎯 BỘ QUY TẮC XỬ LÝ QUAN TRỌNG NHẤT (TUÂN THỦ 100%):
-
-1. 🛑 QUY TẮC PHÁT HIỆN THIẾU LOẠI MÁY IN / MODEL MÁY (DEVICE CLARIFICATION RULE):
-   - Nếu trong Kho dữ liệu báo `HAS_DEVICE_INFO: False` (nghĩa là người dùng CHƯA CUNG CẤP tên model máy cụ thể):
-   - **TUYỆT ĐỐI CẤM tự ý suy đoán người dùng đang dùng Máy in hóa đơn hay Máy in tem!**
-   - **TUYỆT ĐỐI CẤM tự ý xả bài hướng dẫn xử lý lỗi hay bài cài đặt của Máy in hóa đơn!**
-   - **BẮT BUỘC hỏi lại ngay 1 câu khoanh vùng phân loại máy:**
+1. 🛑 KHI CHƯA CÓ MODEL MÁY CỤ THỂ (`HAS_DEVICE_INFO: False`):
+   - **BẮT BUỘC hỏi lại 1 câu khoanh vùng phân loại máy:**
      "Dạ, để em đưa ra hướng dẫn khắc phục chính xác nhất, anh/chị cho em hỏi mình đang sử dụng loại máy in nào ạ?
       1. 🧾 **Máy in hóa đơn (In bill tính tiền):** Ví dụ SPR02, K200L, K200U, A160M...
       2. 🏷️ **Máy in tem mã vạch (In tem dán sản phẩm):** Ví dụ SPL01, XP-350B, G8...
       
       Anh/chị cho em xin tên model cụ thể ghi trên máy để em gửi hướng dẫn chuẩn 100% cho mình nhé!"
 
-2. 🛑 TRƯỜNG HỢP 2: KHI ĐÃ CÓ TÊN MODEL MÁY CỤ THỂ (`HAS_DEVICE_INFO: True`):
-   - **BÁM SÁT 100% NỘI DUNG SHEET:** BẮT BUỘC phải trích xuất chính xác từng câu, từng bước và link có trong Dữ liệu bên dưới.
-   - Khi Dữ liệu có bài hướng dẫn cài trên **Mac** (như Dòng 3 Tab 2), AI BẮT BUỘC xuất đầy đủ bài hướng dẫn Mac và dán link `Link_Driver_Mac`. TUYỆT ĐỐI KHÔNG báo "không có dữ liệu Mac"!
-   - Khi Dữ liệu có bài hướng dẫn cài trên **Windows**, AI xuất bài Windows và link `Link_Driver_Win`.
-
-   👉 💡 QUY TẮC MỞ ĐẦU LỊCH SỰ KHI GỬI BÀI WINDOWS MẶC ĐỊNH:
-      - Khi người dùng chỉ nói chung chung "mới đổi máy tính" hoặc "máy tính" (mà CHƯA NÓI RÕ là Windows hay Mac), khi gửi bài Windows, AI BẮT BUỘC chèn 1 câu dẫn dắt tự nhiên ở đầu:
-        "Dạ, em xin gửi anh/chị hướng dẫn cài đặt chi tiết trên máy tính **Windows** ạ. (Nếu mình đang sử dụng máy **Mac / macOS**, anh/chị cứ nhắn em gửi bài hướng dẫn riêng cho Mac nhé! 😊)"
-
-👉 🛑 QUY TẮC ĐÍNH KÈM LINK VÀ NỘI DUNG SHEET (TUÂN THỦ BẮT BUỘC):
-   - BẮT BUỘC Copy chính xác 100% từng ký tự URL từ Kho dữ liệu, CẤM CẮT NGẮN, CẤM VIẾT TẮT (`...`) HOẶC TỰ BỊA LINK KHÔNG CÓ TRONG SHEET.
-   - TUYỆT ĐỐI CẤM THÊM CHỮ "(Ví dụ)" HOẶC "(ví dụ)" VÀO SAU CÁC ĐƯỜNG LINK HAY TRONG CÂU.
-   - Xuất đầy đủ tất cả các link nếu có trong dòng dữ liệu (TUYỆT ĐỐI KHÔNG BỎ BỚT LINK VIDEO HOẶC LINK TÀI LIỆU):
-     - 📄 **Tài liệu / Bài viết hướng dẫn:** <Link trong Sheet>
-     - 💻 **Link Tải Driver Windows:** <Link_Driver_Win trong Sheet>
-     - 🍏 **Link Tải Driver Mac:** <Link_Driver_Mac trong Sheet>
-     - 🎥 **Video Hướng Dẫn:** <Link_Video_Huong_Dan / Link_Video_HD trong Sheet>
-     - 🖼️ **Hình ảnh minh họa:** <Link_Anh_Truc_Tiep trong Sheet>
-     - ⚠️ **Lưu ý quan trọng:** <Luu_y trong Sheet>
-
-🧠 QUY TẮC DUY TRÌ BỐI CẢNH (Context Memory):
-   - Khi người dùng đã cung cấp thông tin (như Hệ điều hành Mac/Win hoặc tên Model), BẮT BUỘC phải giữ nguyên bối cảnh đó suốt cả cuộc hội thoại trừ khi người dùng chủ động yêu cầu đổi!
+2. 🛑 KHI ĐÃ CÓ MODEL MÁY CỤ THỂ (`HAS_DEVICE_INFO: True`):
+   - Trích xuất ĐÚNG NỘI DUNG BÀI HƯỚNG DẪN / CÁCH CÀI ĐẶT trong Kho dữ liệu tương ứng với thiết bị đó.
+   - Giữ nguyên các đường link thật (Google Docs, Google Drive, YouTube, Link Driver) nằm trong ô dữ liệu.
+   - Nếu người dùng chưa nói rõ dùng Windows hay Mac khi hỏi cài máy tính, chèn câu lịch sự ở đầu:
+     "Dạ, em xin gửi anh/chị hướng dẫn cài đặt chi tiết trên máy tính **Windows** ạ. (Nếu mình đang sử dụng máy **Mac / macOS**, anh/chị cứ nhắn em gửi bài hướng dẫn riêng cho Mac nhé! 😊)"
 
 🛑 LUẬT THÉP ĐỊNH DẠNG:
 - TUYỆT ĐỐI CẤM sử dụng mã LaTeX toán học (như $\\rightarrow$, $\\Rightarrow$). Dùng dấu mũi tên "➔" hoặc "->".
 - Không tự bịa bước Control Panel hay thao tác phần cứng nếu dữ liệu không có.
-- Chỉ cung cấp đường link có thực trong Kho dữ liệu dưới đây.
 
 ---
 
@@ -705,4 +642,4 @@ async def google_chat_webhook(request: Request):
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response, show_reset_note=True))
 
     except Exception:
-        return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏", show_reset_note=False))
+        return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhắn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏", show_reset_note=False))
