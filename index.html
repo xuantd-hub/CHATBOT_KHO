@@ -94,9 +94,10 @@
     <header class="bg-sapo-berkeley text-white px-5 py-3.5 flex items-center justify-between border-b border-sapo-graphite">
         <div class="flex items-center space-x-3.5">
             <!-- Sapo Box Icon Motif -->
-            <div class="w-10 h-10 rounded-2xl bg-sapo-blue text-white flex items-center justify-center font-bold text-sm">
+            <!--<div class="w-10 h-10 rounded-2xl bg-sapo-blue text-white flex items-center justify-center font-bold text-sm">
                 KHO
-            </div>
+            </div>-->
+                <img src="https://bizweb.dktcdn.net/100/508/173/themes/1033891/assets/chat_icon_mess.svg?1785926985432" alt="Sapo Logo" class="w-10 h-10 rounded-2xl object-contain p-1 bg-sapo-blue" />
             <div>
                 <h1 class="font-bold text-base leading-tight flex items-center gap-2">
                     Trợ Lý KHO <span class="text-[10px] bg-sapo-green/20 text-sapo-green font-semibold px-2 py-0.5 rounded-full border border-sapo-green/30">Pro Active</span>
@@ -142,9 +143,10 @@
     <!-- KHUNG CHAT -->
     <main id="chat-box" class="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 max-w-4xl mx-auto w-full">
         <div class="flex items-start gap-3.5">
-            <div class="w-9 h-9 rounded-2xl bg-sapo-blue text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
+           <!-- <div class="w-9 h-9 rounded-2xl bg-sapo-blue text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
                 KHO
-            </div>
+            </div>-->
+                <img src="https://bizweb.dktcdn.net/100/508/173/themes/1033891/assets/chat_icon_mess.svg?1785926985432" alt="Sapo KHO" class="w-9 h-9 rounded-2xl object-contain p-0.5 bg-sapo-blue flex-shrink-0" />
             <div class="bg-white p-4 md:p-5 rounded-3xl rounded-tl-xs border border-slate-200 max-w-2xl text-slate-800 text-sm leading-relaxed space-y-2">
                 <p class="font-bold text-sapo-berkeley text-base flex items-center gap-2">
                     Xin chào! Em là Trợ Lý KHO 👋
@@ -335,7 +337,8 @@
             const aiMsgId = "ai-msg-" + Date.now();
             chatBox.insertAdjacentHTML("beforeend", `
                 <div class="flex items-start gap-3.5">
-                    <div class="w-9 h-9 rounded-2xl bg-sapo-blue text-white flex items-center justify-center font-bold text-xs flex-shrink-0">KHO</div>
+                    <!--<div class="w-9 h-9 rounded-2xl bg-sapo-blue text-white flex items-center justify-center font-bold text-xs flex-shrink-0">KHO</div>-->
+                        <img src="https://bizweb.dktcdn.net/100/508/173/themes/1033891/assets/chat_icon_mess.svg?1785926985432" alt="Sapo KHO" class="w-9 h-9 rounded-2xl object-contain p-0.5 bg-sapo-blue flex-shrink-0" />
                     <div class="bg-white p-4 md:p-5 rounded-3xl rounded-tl-xs border border-slate-200 max-w-2xl text-slate-800 text-sm leading-relaxed space-y-2 relative group w-full">
                         <div id="${aiMsgId}" class="markdown-body">
                             <div class="flex items-center gap-3 py-1 text-slate-400 font-medium text-xs">

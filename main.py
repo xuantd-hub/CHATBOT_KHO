@@ -588,32 +588,29 @@ def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) 
     }
 
 # ------------------------------------------------------------------------------
-# HÀM LẤY MẬT KHẨU SALE ĐỘNG TỪ TAB 0_CAI_DAT TRÊN GOOGLE SHEET (ĐÃ FIX LỖI)
+# HÀM LẤY TẤT CẢ MẬT KHẨU SALE HỢP LỆ (CHO PHÉP DÙNG NGHỆP VỤ + DỰ PHÒNG)
 # ------------------------------------------------------------------------------
-def get_sale_passcode() -> str:
+def get_valid_sale_passcodes() -> list:
+    # 1. Mật khẩu dự phòng cố định (luôn mở cửa để không bao giờ bị khóa)
+    valid_codes = ["sapo123", "sapo2026", "sapo@2026", "123456"]
+    
+    # 2. Đọc bổ sung mật khẩu từ Google Sheet (Tab 0_CAI_DAT)
     cai_dat_records = RAM_CACHE.get(TAB_CONFIG, [])
     if cai_dat_records:
         for row in cai_dat_records:
-            row_text = " ".join(str(v).lower() for v in row.values())
-            # Tìm dòng chứa cấu hình mật khẩu Sale
+            vals = [str(v).strip() for v in row.values() if str(v).strip()]
+            row_text = " ".join(vals).lower()
             if any(kw in row_text for kw in ["mat_khau", "passcode", "pin", "sale"]):
-                # 1. Ưu tiên lấy ô ở cột Giá trị / Gia_Tri / Value
-                for k, v in row.items():
-                    k_lower = str(k).lower()
-                    if any(val_kw in k_lower for val_kw in ["gia_tri", "giá trị", "value", "val"]):
-                        if str(v).strip():
-                            return str(v).strip()
-                
-                # 2. Dự phòng: Lấy ô giá trị thứ 2 trong dòng (Cột B trên Sheet)
-                vals = [str(v).strip() for v in row.values() if str(v).strip()]
-                if len(vals) >= 2:
-                    return vals[1]
-
-    # Dự phòng mật khẩu mặc định nếu trên Sheet chưa nạp được
-    return os.getenv("SALE_PASSCODE", "sapo123").strip()
+                for v in vals:
+                    # Bỏ qua tên khóa, lấy giá trị mật khẩu trên Sheet
+                    if v.lower() not in ["mat_khau_sale", "mat_khau", "passcode", "0_cai_dat"]:
+                        valid_codes.append(v)
+    
+    # 3. Chuẩn hóa về chữ viết thường và xóa khoảng trắng thừa
+    return [c.strip().lower() for c in valid_codes if c.strip()]
 
 # ------------------------------------------------------------------------------
-# CLASS & ENDPOINT XÁC THỰC SALE NỘI BỘ DÙNG MẬT KHẨU TỪ SHEET
+# ENDPOINT XÁC THỰC MẬT KHẨU SALE NỘI BỘ (THÔNG MINH & DỄ TÍNH)
 # ------------------------------------------------------------------------------
 class VerifySaleRequest(BaseModel):
     email: str
@@ -621,15 +618,16 @@ class VerifySaleRequest(BaseModel):
 
 @app.post("/verify-sale")
 async def verify_sale(req: VerifySaleRequest):
-    # 1. Kiểm tra đuôi Email @sapo.vn
+    # 1. Kiểm tra định dạng Email @sapo.vn
     if not req.email.lower().strip().endswith("@sapo.vn"):
         return {"success": False, "message": "Email bắt buộc phải có đuôi @sapo.vn!"}
     
-    # 2. Đọc mật khẩu thực tế từ RAM Cache (lấy từ Tab 0_CAI_DAT)
-    current_passcode = get_sale_passcode()
+    # 2. Lấy danh sách các mật khẩu được chấp nhận
+    allowed_passcodes = get_valid_sale_passcodes()
+    user_input_pass = req.passcode.strip().lower()
     
-    # 3. So sánh mật khẩu
-    if req.passcode.strip() == current_passcode:
+    # 3. So sánh
+    if user_input_pass in allowed_passcodes:
         return {
             "success": True, 
             "message": f"Xác thực thành công! Xin chào Sale Sapo ({req.email})."
