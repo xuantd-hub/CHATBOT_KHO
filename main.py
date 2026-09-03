@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Perfect Platform Engine", version="2100.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Universal Context Engine", version="2600.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,8 +100,8 @@ async def load_sheet_data_async():
 def health_check():
     return {
         "status": "healthy", 
-        "version": "2100.0", 
-        "engine": "Perfect Platform Engine",
+        "version": "2600.0", 
+        "engine": "Universal Context Engine",
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
@@ -160,7 +160,7 @@ def extract_user_text(event: dict) -> str:
     return deep_search(event)
 
 # ------------------------------------------------------------------------------
-# BÓC TÁCH THIẾT BỊ HOẶC HỆ ĐIỀU HÀNH TỪ LỊCH SỬ CHAT
+# QUÉT NGƯỢC LỊCH SỬ DỂ GIỮ THUỘC TÍNH BỀN VỮNG (MODEL & HỆ ĐIỀU HÀNH)
 # ------------------------------------------------------------------------------
 def extract_device_info_from_history(messages: list) -> tuple:
     device_models = ["spr02", "spr01", "k200l", "k200u", "a868", "hprt", "80fe", "spl01", "xp350b", "g8", "a160m", "xprinter", "imin"]
@@ -170,6 +170,7 @@ def extract_device_info_from_history(messages: list) -> tuple:
     detected_model = ""
     detected_category = ""
 
+    # Quét ngược từ tin nhắn gần nhất về tin nhắn cũ nhất để lấy Model mới nhất được nhắc đến
     for m in reversed(messages):
         txt = m.get("text", "").lower()
         if not detected_model:
@@ -190,42 +191,54 @@ def extract_device_info_from_history(messages: list) -> tuple:
     return detected_model, detected_category
 
 def extract_platform_intent(messages: list) -> str:
-    # 🎯 SỬA LỖI: Lặp từ câu tin nhắn MỚI NHẤT ngược về trước để luôn ưu tiên câu hỏi hiện tại
-    user_msgs = [m.get("text", "") for m in messages if m.get("role") in ["user", "Khach_Hang"]]
-    if not user_msgs:
-        return ""
+    """
+    🎯 BẢO TỒN HỆ ĐIỀU HÀNH VĨNH VIỄN:
+    Quét ngược từ tin nhắn mới nhất về cũ nhất. Dù đã qua 10 câu, 
+    chỉ cần câu 1 người dùng từng gõ "Mac", hệ thống vẫn nhớ 100% là "Mac".
+    """
+    for m in reversed(messages):
+        if m.get("role") in ["user", "Khach_Hang"]:
+            txt = m.get("text", "").lower()
+            if any(k in txt for k in ["mac", "macbook", "macos"]):
+                return "mac"
+            if any(k in txt for k in ["windows", "win", "win10", "win11", "win7"]):
+                return "windows"
+            if any(k in txt for k in ["điện thoại", "mobile", "app", "xtest", "android", "ios", "iphone", "lan"]):
+                return "mobile"
+    return ""
 
-    for msg in reversed(user_msgs[-3:]):
-        txt = msg.lower()
-        if any(k in txt for k in ["mac", "macbook", "macos"]):
-            return "mac"
-        if any(k in txt for k in ["windows", "win", "win10", "win11", "win7"]):
-            return "windows"
-        if any(k in txt for k in ["điện thoại", "mobile", "app", "xtest", "android", "ios", "iphone", "lan"]):
-            return "mobile"
-            
+def extract_latest_action_intent(messages: list) -> str:
+    """
+    🎯 Ý ĐỊNH HÀNH ĐỘNG CÓ THỨ TỰ ƯU TIÊN (STACK PRECEDENCE):
+    Quét ngược để lấy Ý ĐỊNH HÀNH ĐỘNG GẦN NHẤT. Nếu câu 1 hỏi "driver", 
+    câu 4 hỏi "LAN", thì LAN xuất hiện trước nên sẽ đè lên driver cũ.
+    """
+    for m in reversed(messages):
+        if m.get("role") in ["user", "Khach_Hang"]:
+            txt = m.get("text", "").lower()
+            if any(k in txt for k in ["lan", "ip", "mạng", "wifi", "app", "xtest", "điện thoại"]):
+                return "lan_setup"
+            if any(k in txt for k in ["driver", "cài", "setup", "máy tính", "windows", "mac"]):
+                return "driver_setup"
+            if any(k in txt for k in ["lỗi", "không", "kẹt", "hư", "trắng", "mực", "cắt", "sửa", "ra mực", "không ra"]):
+                return "error_fix"
+            if any(k in txt for k in ["bảo hành", "đổi trả", "chính sách", "thu hồi"]):
+                return "policy"
     return ""
 
 # ------------------------------------------------------------------------------
-# TRÍCH XUẤT DỮ LIỆU RAG VỚI ƯU TIÊN HỆ ĐIỀU HÀNH TỐI ĐA
+# TRÍCH XUẤT DỮ LIỆU RAG THÔNG MINH
 # ------------------------------------------------------------------------------
 def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     
     user_texts = [m.get("text", "") for m in messages_list if m.get("role") in ["user", "Khach_Hang"]]
     combined_user_text = " ".join(user_texts).lower()
-    
-    latest_msg = messages_list[-1]["text"] if messages_list else ""
-    latest_lower = latest_msg.lower()
 
     detected_model, detected_category = extract_device_info_from_history(messages_list)
     platform_intent = extract_platform_intent(messages_list)
+    action_intent = extract_latest_action_intent(messages_list)
     has_device_info = bool(detected_model or detected_category)
-
-    # Nhận diện Ý định
-    is_setup_intent = any(k in combined_user_text for k in ["cài", "driver", "xtest", "app", "điện thoại", "máy tính", "kết nối", "lan", "ip", "setup", "windows", "mac"])
-    is_error_intent = any(k in combined_user_text for k in ["lỗi", "không", "kẹt", "hư", "trắng", "mực", "cắt", "sự cố", "sửa", "ra mực", "không ra"])
-    is_policy_intent = any(k in combined_user_text for k in ["bảo hành", "đổi trả", "chính sách", "thu hồi"])
 
     stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "thế", "nào", "bao", "nhiêu", "thông", "số", "qua", "đã", "ok", "rồi", "nhưng", "lại", "muốn"}
     words = [w for w in combined_user_text.split() if len(w) > 1 and w not in stop_words]
@@ -233,9 +246,9 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     scored_rows = []
     for tab in accessible_tabs:
         tab_bonus = 0
-        if is_setup_intent and tab == "2_HUONG_DAN_CAI_DAT": tab_bonus = 500
-        elif is_error_intent and tab == "1_THIET_BI_VA_LOI": tab_bonus = 500
-        elif is_policy_intent and tab == "3_CHINH_SACH_SAPO": tab_bonus = 500
+        if action_intent in ["lan_setup", "driver_setup"] and tab == "2_HUONG_DAN_CAI_DAT": tab_bonus = 500
+        elif action_intent == "error_fix" and tab == "1_THIET_BI_VA_LOI": tab_bonus = 500
+        elif action_intent == "policy" and tab == "3_CHINH_SACH_SAPO": tab_bonus = 500
 
         for row in RAM_CACHE.get(tab, []):
             row_text = " ".join(str(v).lower() for v in row.values())
@@ -247,10 +260,12 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
             if detected_category and detected_category in row_text:
                 score += 150
 
-            # 🎯 BỘ THƯỞNG ĐIỂM HỆ ĐIỀU HÀNH CHÍNH XÁC +1000 ĐIỂM
-            if tab == "2_HUONG_DAN_CAI_DAT" and platform_intent:
+            # 🎯 BỘ THƯỞNG ĐIỂM CHÍNH XÁC THEO HỆ ĐIỀU HÀNH VÀ HÀNH ĐỘNG
+            if tab == "2_HUONG_DAN_CAI_DAT":
                 row_thao_tac = str(row.get("Loai_Thao_Tac", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower() + " " + str(row.get("Noi_Dung_Huong_Dan", "")).lower()
-                if platform_intent == "mac" and "mac" in row_thao_tac:
+                if action_intent == "lan_setup" and any(k in row_thao_tac for k in ["lan", "ip", "mạng", "app", "xtest"]):
+                    score += 1000
+                elif platform_intent == "mac" and "mac" in row_thao_tac:
                     score += 1000
                 elif platform_intent == "windows" and ("win" in row_thao_tac or "windows" in row_thao_tac):
                     score += 1000
@@ -267,7 +282,7 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     scored_rows.sort(key=lambda x: x[0], reverse=True)
     top_matches = scored_rows[:3]
 
-    knowledge_text = f"HAS_DEVICE_INFO: {has_device_info}\nDETECTED_MODEL: {detected_model}\nDETECTED_CATEGORY: {detected_category}\nPLATFORM_INTENT: {platform_intent}\n"
+    knowledge_text = f"HAS_DEVICE_INFO: {has_device_info}\nDETECTED_MODEL: {detected_model}\nDETECTED_CATEGORY: {detected_category}\nPLATFORM_INTENT: {platform_intent}\nACTION_INTENT: {action_intent}\n"
     for score, tab, row in top_matches:
         knowledge_text += f"\n=== DỮ LIỆU THUỘC TAB [{tab}] ===\n"
         for key, value in row.items():
@@ -277,7 +292,7 @@ def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     return knowledge_text, has_device_info
 
 # ------------------------------------------------------------------------------
-# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG & BÁM SÁT 100% SHEET
+# SYSTEM PROMPT BẢO VỆ ĐỊNH DẠNG & ÉP TÁCH DÒNG LINK
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str, has_device_info: bool) -> str:
     return f"""
@@ -288,6 +303,11 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
 - **Sử dụng Icon/Emoji sinh động** ở đầu các tiêu đề và từng bước thao tác (VD: 💻, 🍏, 📱, 🛠️, 📌, ✅, 👉, 📄, 🎥, ⚠️).
 - **Chia nhỏ đoạn văn thoáng đãng**, dùng danh sách gạch đầu dòng (Bullet points).
 - **In đậm các từ khóa quan trọng**, tên nút bấm, tên bước (VD: **Bước 1: Tải Driver**, **Link Driver Mac:**).
+
+🛑 QUY TẮC ÉP TÁCH DÒNG ĐỘC LẬP CHO TẤT CẢ LINK (SEPARATED LINK RULE):
+- BẮT BUỘC mỗi đường link URL, hình ảnh hoặc video hướng dẫn phải nằm trên một dòng riêng biệt bắt đầu bằng dấu gạch đầu dòng (`- `).
+- TUYỆT ĐỐI CẤM dán 2 icon hay 2 link trên cùng 1 dòng ngang!
+- TUYỆT ĐỐI CẤM tự xuất các câu trong ngoặc vuông giả lập như `[Anh/chị vui lòng...]` hay `[Link...]`. Chỉ dán đường link URL thực tế `https://...` nếu có trong Kho dữ liệu.
 
 🎯 BỘ QUY TẮC XỬ LÝ QUAN TRỌNG NHẤT (TUÂN THỦ 100%):
 
@@ -304,11 +324,16 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
 
 2. 🛑 TRƯỜNG HỢP 2: KHI ĐÃ CÓ TÊN MODEL MÁY HOẶC ĐÃ NÓI RÕ LOẠI MÁY IN (`HAS_DEVICE_INFO: True`):
    - **BÁM SÁT 100% NỘI DUNG SHEET:** BẮT BUỘC phải trích xuất chính xác từng câu, từng bước và link có trong Dữ liệu bên dưới.
-   - Khi Dữ liệu có bài hướng dẫn cài trên **Mac** (như Dòng 3 Tab 2), AI BẮT BUỘC xuất đầy đủ bài hướng dẫn Mac và dán link `Link_Driver_Mac`. TUYỆT ĐỐI KHÔNG báo "không có dữ liệu Mac" hay hỏi lại câu hỏi phụ!
+   - Khi Dữ liệu có bài hướng dẫn cài trên **Mac** (như Dòng 3 Tab 2), AI BẮT BUỘC xuất đầy đủ bài hướng dẫn Mac và dán link `Link_Driver_Mac`. TUYỆT ĐỐI KHÔNG báo "không có dữ liệu Mac"!
    - Khi Dữ liệu có bài hướng dẫn cài trên **Windows**, AI xuất bài Windows và link `Link_Driver_Win`.
 
-👉 🛑 QUY TẮC ĐÍNH KÈM LINK VÀ NỘI DUNG SHEET:
-   - Xuất đầy đủ các cột link nếu có trong dòng dữ liệu:
+   👉 💡 QUY TẮC MỞ ĐẦU LỊCH SỰ KHI GỬI BÀI WINDOWS MẶC ĐỊNH:
+      - Khi người dùng chỉ nói chung chung "mới đổi máy tính" hoặc "máy tính" (mà CHƯA NÓI RÕ là Windows hay Mac), khi gửi bài Windows, AI BẮT BUỘC chèn 1 câu dẫn dắt tự nhiên ở đầu:
+        "Dạ, em xin gửi anh/chị hướng dẫn cài đặt chi tiết trên máy tính **Windows** ạ. (Nếu mình đang sử dụng máy **Mac / macOS**, anh/chị cứ nhắn em gửi bài hướng dẫn riêng cho Mac nhé! 😊)"
+
+👉 🛑 QUY TẮC ĐÍNH KÈM LINK VÀ NỘI DUNG SHEET (TUÂN THỦ BẮT BUỘC):
+   - BẮT BUỘC Copy chính xác 100% từng ký tự URL từ Kho dữ liệu, CẤM CẮT NGẮN, CẤM VIẾT TẮT (`...`) HOẶC TỰ BỊA LINK KHÔNG CÓ TRONG SHEET.
+   - Xuất đầy đủ tất cả các link nếu có trong dòng dữ liệu (TUYỆT ĐỐI KHÔNG BỎ BỚT LINK VIDEO HOẶC LINK TÀI LIỆU):
      - 📄 **Tài liệu / Bài viết hướng dẫn:** <Link trong Sheet>
      - 💻 **Link Tải Driver Windows:** <Link_Driver_Win trong Sheet>
      - 🍏 **Link Tải Driver Mac:** <Link_Driver_Mac trong Sheet>
@@ -316,7 +341,7 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
      - ⚠️ **Lưu ý quan trọng:** <Luu_y trong Sheet>
 
 🧠 QUY TẮC DUY TRÌ BỐI CẢNH (Context Memory):
-   - Khi người dùng đã cung cấp tên model (VD: SPR02 hay K200L) ở các câu trước -> BẮT BUỘC phải giữ nguyên bối cảnh model đó cho toàn bộ các câu hỏi phía sau.
+   - Khi người dùng đã cung cấp thông tin (như Hệ điều hành Mac/Win hoặc tên Model), BẮT BUỘC phải giữ nguyên bối cảnh đó suốt cả cuộc hội thoại trừ khi người dùng chủ động yêu cầu đổi!
 
 🛑 LUẬT THÉP ĐỊNH DẠNG:
 - TUYỆT ĐỐI CẤM sử dụng mã LaTeX toán học (như $\\rightarrow$, $\\Rightarrow$). Dùng dấu mũi tên "➔" hoặc "->".
@@ -330,7 +355,7 @@ KHO DỮ LIỆU GỐC SAPO:
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI LLM CÓ BẢO VỆ CHỐNG TRẢ VỀ CÂU CHÀO KHI LỖI
+# HÀM GỌI LLM CÓ TEMPERATURE = 0.1 ÉP COPY NGUYÊN VĂN LINK
 # ------------------------------------------------------------------------------
 async def call_llm_with_history(system_instruction: str, messages_list: list) -> str:
     messages_payload = [{"role": "system", "content": system_instruction}]
@@ -345,7 +370,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         payload = {
             "model": CEREBRAS_MODEL,
             "messages": messages_payload,
-            "temperature": 0.3,
+            "temperature": 0.1,
             "top_p": 0.9,
             "max_tokens": 2000
         }
@@ -371,7 +396,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
         payload = {
             "systemInstruction": {"parts": [{"text": system_instruction}]},
             "contents": gemini_contents,
-            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2000}
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2000}
         }
         try:
             res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=8.0)
@@ -464,3 +489,5 @@ async def google_chat_webhook(request: Request):
 
     except Exception:
         return JSONResponse(content=wrap_gsuite_addon_response("⚠️ Hệ thống AI hiện đang bận xử lý. Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"))
+
+
