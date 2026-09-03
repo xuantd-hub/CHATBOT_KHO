@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Full Synchronized Engine", version="5200.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Absolute Precision Engine", version="5300.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -115,8 +115,8 @@ def get_auto_reset_minutes() -> int:
 def health_check():
     return {
         "status": "healthy", 
-        "version": "5200.0", 
-        "engine": "Full Synchronized Engine",
+        "version": "5300.0", 
+        "engine": "Absolute Precision Engine",
         "auto_reset_minutes": get_auto_reset_minutes(),
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
@@ -133,7 +133,7 @@ class ChatRequest(BaseModel):
     role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
-# LÀM SẠCH VĂN BẢN VÀ KHÔI PHỤC LINK NGUYÊN BẢN TỰ ĐỘNG (BẢO HIỂM 2 LỚP)
+# LÀM SẠCH VĂN BẢN VÀ BỘ LỌC ÉP THẾ DỮ LIỆU THẬT DỰ PHÒNG
 # ------------------------------------------------------------------------------
 def clean_thinking_process(text: str) -> str:
     if "Here's a thinking process:" in text:
@@ -144,51 +144,43 @@ def clean_thinking_process(text: str) -> str:
     text = re.sub(r'\$\\rightarrow\$|\\rightarrow|\$\\Rightarrow\$|\\Rightarrow', '➔', text)
     return text.strip()
 
-def restore_exact_urls(text: str, top_matches: list) -> str:
-    text = re.sub(r'\s*\(\s*[Vv]í dụ:?\s*\)', '', text)
-
+def replace_placeholders_with_real_data(text: str, top_matches: list) -> str:
     if not top_matches:
         return text
-
-    win_url = ""
-    mac_url = ""
-    doc_url = ""
-    video_url = ""
-    img_urls = []
-
+    
+    merged_row = {}
     for score, tab, row in top_matches:
         for k, v in row.items():
-            val_str = str(v).strip()
-            if val_str.startswith("http://") or val_str.startswith("https://"):
-                key_lower = str(k).lower()
-                if "win" in key_lower: win_url = val_str
-                elif "mac" in key_lower: mac_url = val_str
-                elif "video" in key_lower or "hd" in key_lower: video_url = val_str
-                elif "anh" in key_lower or "img" in key_lower or "truc_tiep" in key_lower: img_urls.append(val_str)
-                elif "noi_dung" in key_lower or "huong_dan" in key_lower or "khac_phuc" in key_lower: doc_url = val_str
+            if v and k not in merged_row:
+                merged_row[k] = str(v).strip()
+    
+    noi_dung = merged_row.get("Noi_Dung_Huong_Dan") or merged_row.get("Cach_Khac_Phuc") or ""
+    win_link = merged_row.get("Link_Driver_Win") or ""
+    mac_link = merged_row.get("Link_Driver_Mac") or ""
+    video_link = merged_row.get("Link_Video_Huong_Dan") or ""
+    img_link = merged_row.get("Link_Anh_Truc_Tiep") or merged_row.get("Link_Anh_Minh_Hoa_Tem") or ""
+    luu_y = merged_row.get("Luu_Y") or merged_row.get("Ghi_chu") or merged_row.get("Quy_Trinh_Bao_Hanh") or ""
 
-    url_pattern = re.compile(r'https?://[^\s\)\>\]]+')
-    found_urls = url_pattern.findall(text)
+    # Ép thay thế nếu AI lỡ xuất các khung ngoặc vuông
+    text = re.sub(r'\[Tại đây, em sẽ trích xuất[^\]]*\]', noi_dung, text)
+    text = re.sub(r'\[Noi_Dung_Huong_Dan\]', noi_dung, text)
+    text = re.sub(r'\[Cach_Khac_Phuc\]', noi_dung, text)
+    
+    text = re.sub(r'\[Link_Driver_Win\]', win_link, text)
+    text = re.sub(r'\[Link_Driver_Mac\]', mac_link, text)
+    text = re.sub(r'\[Link_Video_Huong_Dan\]', video_link, text)
+    text = re.sub(r'\[Link_Anh_Truc_Tiep\]', img_link, text)
+    
+    text = re.sub(r'\[Giá trị Luu_Y[^\]]*\]', luu_y, text)
+    text = re.sub(r'\[Luu_Y\]', luu_y, text)
+    text = re.sub(r'\[Ghi_chu\]', luu_y, text)
 
-    for found_url in found_urls:
-        clean_found = found_url.rstrip('.,;')
-        if "1S_" in clean_found or "S-S-S" in clean_found or "Driver_Win" in clean_found or "Guide" in clean_found or "example_" in clean_found:
-            replacement = None
-            if "Driver_Win" in clean_found or "win" in clean_found.lower():
-                replacement = win_url or doc_url
-            elif "Driver_Mac" in clean_found or "mac" in clean_found.lower():
-                replacement = mac_url or doc_url
-            elif "Video" in clean_found or "youtube" in clean_found.lower() or "hd" in clean_found.lower() or "example" in clean_found:
-                replacement = video_url
-            elif "anh" in clean_found.lower() or "img" in clean_found.lower():
-                replacement = img_urls[0] if img_urls else doc_url
-            elif "Guide" in clean_found or "doc" in clean_found.lower():
-                replacement = doc_url or win_url
-            
-            if replacement:
-                text = text.replace(clean_found, replacement)
+    # Dọn dẹp các dòng bullet trống nếu link không tồn tại trong Sheet
+    text = re.sub(r'•\s*💻\s*Link Tải Driver Windows:\s*\n?', '', text)
+    text = re.sub(r'•\s*🍏\s*Link Tải Driver Mac:\s*\n?', '', text)
+    text = re.sub(r'•\s*🎥\s*Video Hướng Dẫn:\s*\n?', '', text)
+    text = re.sub(r'•\s*🖼️\s*Hình Ảnh Minh Họa:\s*\n?', '', text)
 
-    text = re.sub(r'\s*\(\s*Ví dụ\s*\)', '', text, flags=re.IGNORECASE)
     return text
 
 def extract_user_text(event: dict) -> str:
@@ -223,7 +215,7 @@ def extract_user_text(event: dict) -> str:
     return deep_search(event)
 
 # ------------------------------------------------------------------------------
-# BÓC TÁCH THIẾT BỊ VÀ Ý ĐỊNH DÙNG AI ROUTER PHỤ
+# BÓC TÁCH THIẾT BỊ VÀ Ý ĐỊNH
 # ------------------------------------------------------------------------------
 def extract_device_info_from_history(messages: list) -> tuple:
     device_models = ["spr02", "spr01", "k200l", "k200u", "a868", "hprt", "80fe", "spl01", "xp350b", "g8", "a160m", "xprinter", "imin"]
@@ -353,7 +345,7 @@ Nhãn:"""
     return extract_latest_action_intent_keywords(messages)
 
 # ------------------------------------------------------------------------------
-# MA TRẬN ĐIỀU HƯỚNG TRÍCH XUẤT DỮ LIỆU RAG CHÍNH XÁC CỘT SHEET
+# TRÍCH XUẤT DỮ LIỆU RAG
 # ------------------------------------------------------------------------------
 async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
@@ -432,34 +424,21 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
 # ------------------------------------------------------------------------------
 def build_smart_system_prompt(knowledge_context: str, has_device_info: bool) -> str:
     return f"""
-Bạn là **Trợ Lý KHO Sapo** – Trợ lý AI cao cấp, có tư duy logic sâu sắc và am hiểu kỹ thuật thiết bị Sapo.
-Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghiệp, hành văn tự nhiên, rõ ràng.
+Bạn là **Trợ Lý KHO Sapo** – Trợ lý AI cao cấp hỗ trợ kỹ thuật thiết bị Sapo.
+Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghiệp, hành văn tự nhiên.
 
-📌 QUY TẮC PHÂN LOẠI THIẾT BỊ CHUẨN (MANDATORY):
-- **Máy in hóa đơn (in bill tính tiền):** SPR02, SPR01, K200L, K200U, A160M, A868, HPRT. 
-  *(BẮT BUỘC: SPR02 LÀ MÁY IN HÓA ĐƠN, KHÔNG PHẢI MÁY IN TEM).*
-- **Máy in tem mã vạch (in tem dán):** SPL01, XP-350B, G8.
+📌 PHÂN LOẠI THIẾT BỊ:
+- Máy in hóa đơn: SPR02, SPR01, K200L, K200U, A160M, A868, HPRT. (ĐẶC BIỆT: SPR02 LÀ MÁY IN HÓA ĐƠN).
+- Máy in tem: SPL01, XP-350B, G8.
 
-🎨 QUY TẮC BỐ CỤC TRÌNH BÀY ĐẸP MẮT & DỄ ĐỌC:
-- **Sử dụng Icon/Emoji sinh động** ở đầu các tiêu đề và từng bước thao tác (VD: 💻, 🍏, 📱, 🛠️, 📌, ✅, 👉, 📄, 🎥, ⚠️, 📞).
-- **Chia nhỏ đoạn văn thoáng đãng**, dùng danh sách gạch đầu dòng (Bullet points).
-- **In đậm các từ khóa quan trọng**, tên nút bấm, tên từng bước.
-
-🛑 QUY TẮC TRÍCH XUẤT NGUYÊN VĂN TỪ SHEET:
-1. Copy chính xác 100% nội dung bài hướng dẫn tại ô `Noi_Dung_Huong_Dan` hoặc `Cach_Khac_Phuc`.
-2. BẮT BUỘC dán nguyên văn các đường link thực tế (Google Docs, Drive, YouTube) nếu có trong dòng dữ liệu:
-   - `- 💻 Link Tải Driver Windows:` <giá trị Link_Driver_Win>
-   - `- 🍏 Link Tải Driver Mac:` <giá trị Link_Driver_Mac>
-   - `- 🎥 Video Hướng Dẫn:` <giá trị Link_Video_Huong_Dan>
-   - `- 🖼️ Hình Ảnh Minh Họa:` <giá trị Link_Anh_Truc_Tiep>
-   - `- ⚠️ Lưu ý quan trọng:` <giá trị Luu_Y hoặc Ghi_chu>
-3. TUYỆT ĐỐI CẤM tự ý thêm cụm từ "(Ví dụ)" vào sau các đường link.
-4. TUYỆT ĐỐI CẤM tự bịa ra link giả khi trong dữ liệu không có link.
+🛑 BẮT BUỘC TRÍCH XUẤT NGUYÊN VĂN TỪ KHO DỮ LIỆU GỐC:
+1. Đọc nội dung ở mục `[Noi_Dung_Huong_Dan]` hoặc `[Cach_Khac_Phuc]` trong KHO DỮ LIỆU GỐC bên dưới và TRÍCH XUẤT ĐẦY ĐỦ NGUYÊN VĂN các bước thao tác ra câu trả lời.
+2. Nếu trong KHO DỮ LIỆU GỐC có chứa đường link http/https thực tế ở các trường `Link_Driver_Win`, `Link_Driver_Mac`, `Link_Video_Huong_Dan`, `Link_Anh_Truc_Tiep`, hãy dán ĐÚNG ĐƯỜNG LINK THỰC TẾ ĐÓ ra bài viết.
+3. TUYỆT ĐỐI KHÔNG xuất các thẻ ngoặc vuông mẫu kiểu [Link_Driver_Win] hay [Nội dung...]. Bạn phải điền nội dung thật và đường link URL thật từ KHO DỮ LIỆU GỐC vào!
 
 🎯 BỘ QUY TẮC XỬ LÝ THEO TRƯỜNG HỢP:
 
 1. 🛑 KHI CHƯA CÓ MODEL MÁY CỤ THỂ VÀ CHƯA NÓI LOẠI MÁY (`HAS_DEVICE_INFO: False`):
-   - **TUYỆT ĐỐI CẤM tự ý suy đoán loại máy in!**
    - **BẮT BUỘC hỏi lại ngay 1 câu khoanh vùng phân loại máy:**
      "Dạ, để em đưa ra hướng dẫn khắc phục chính xác nhất, anh/chị cho em hỏi mình đang sử dụng loại máy in nào ạ?
       1. 🧾 **Máy in hóa đơn (In bill tính tiền):** Ví dụ SPR02, K200L, K200U, A160M...
@@ -468,7 +447,7 @@ Xưng hô: Xưng "Em", gọi "Anh/chị". Phong cách: Lịch sự, chuyên nghi
       Anh/chị cho em xin tên model cụ thể ghi trên máy để em gửi hướng dẫn chuẩn 100% cho mình nhé!"
 
 2. 🛑 KHI ĐÃ CÓ MODEL MÁY HOẶC NÓI RÕ LOẠI MÁY (`HAS_DEVICE_INFO: True`):
-   - Bám sát 100% trích xuất dữ liệu trong Kho dữ liệu bên dưới.
+   - Trích xuất 100% nội dung và link thực tế từ KHO DỮ LIỆU GỐC bên dưới.
 
 🧠 QUY TẮC DUY TRÌ BỐI CẢNH (Context Memory):
    - Khi người dùng đã cung cấp tên model (VD: SPR02 hay K200L) ở các câu trước -> BẮT BUỘC phải giữ nguyên bối cảnh model đó cho toàn bộ các câu hỏi phía sau.
@@ -484,7 +463,7 @@ KHO DỮ LIỆU GỐC SAPO:
 """
 
 # ------------------------------------------------------------------------------
-# HÀM GỌI LLM CÓ BẢO VỆ DỰ PHÒNG CÂN BẰNG
+# HÀM GỌI LLM
 # ------------------------------------------------------------------------------
 async def call_llm_with_history(system_instruction: str, messages_list: list) -> str:
     messages_payload = [{"role": "system", "content": system_instruction}]
@@ -584,7 +563,7 @@ async def chat_stream(req: ChatRequest):
 
     async def generate_response_stream():
         ans = await call_llm_with_history(system_instruction, req.messages)
-        ans = restore_exact_urls(ans, top_matches)
+        ans = replace_placeholders_with_real_data(ans, top_matches)
         yield ans
 
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
@@ -649,7 +628,7 @@ async def google_chat_webhook(request: Request):
         system_instruction = build_smart_system_prompt(focused_knowledge, has_device_info)
 
         ai_response = await call_llm_with_history(system_instruction, GOOGLE_CHAT_HISTORY[space_id])
-        ai_response = restore_exact_urls(ai_response, top_matches)
+        ai_response = replace_placeholders_with_real_data(ai_response, top_matches)
 
         GOOGLE_CHAT_HISTORY[space_id].append({"role": "assistant", "text": ai_response})
 
