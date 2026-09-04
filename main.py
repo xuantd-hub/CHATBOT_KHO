@@ -27,7 +27,8 @@ app.add_middleware(
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 
 # ➔ ĐIỀN LINK APPS SCRIPT WEB APP CỦA ANH VÀO ĐÂY HOẶC ĐẶT BIẾN MÔI TRƯỜNG APPS_SCRIPT_URL
-APPS_SCRIPT_URL = os.getenv("https://script.google.com/macros/s/AKfycbz0lb86y3O6ynTkGK4yVMSsZrJSB4vKXOoh_cyu4g4JNm2Cr17k7DAQ21l3YoMwLYl9/exec", "").strip()
+# CODE SỬA CHUẨN:
+APPS_SCRIPT_URL = os.getenv("APPS_SCRIPT_URL", "https://script.google.com/macros/s/AKfycbz0lb86y3O6ynTkGK4yVMSsZrJSB4vKXOoh_cyu4g4JNm2Cr17k7DAQ21l3YoMwLYl9/exec").strip()
 
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "").strip()
 CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "gemma-4-31b").strip()
@@ -215,6 +216,13 @@ def restore_exact_urls(text: str, top_matches: list) -> str:
 # ------------------------------------------------------------------------------
 # TRÍCH XUẤT ĐẦY ĐỦ THÔNG TIN NGƯỜI DÙNG TỪ GOOGLE CHAT WEBHOOK
 # ------------------------------------------------------------------------------
+def fix_vietnamese_name_order(name: str) -> str:
+    if not name: return ""
+    parts = name.strip().split()
+    # Nếu tên có từ 2 từ trở lên (Ví dụ: "Xuân Thái Đình" -> chuyển "Xuân" về cuối)
+    if len(parts) >= 2:
+        return " ".join(parts[1:] + [parts[0]])
+    return name
 def extract_user_text_and_identity(event: dict) -> tuple:
     user_email = ""
     user_name = ""
@@ -264,7 +272,7 @@ def extract_user_text_and_identity(event: dict) -> tuple:
             return ""
         user_text = deep_search(event)
 
-    clean_name = user_name.strip()
+    clean_name = fix_vietnamese_name_order(user_name)
     if clean_name == "Google Chat User":
         clean_name = ""
 
