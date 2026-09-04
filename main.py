@@ -7,12 +7,12 @@ import re
 import pandas as pd
 import httpx
 from datetime import datetime
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Synchronized Engine", version="4500.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Synchronized Engine", version="4600.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,7 +36,7 @@ RAM_CACHE = {}
 GOOGLE_CHAT_HISTORY = {} 
 GOOGLE_CHAT_LAST_ACTIVE = {} 
 
-# BỘ LƯU TRỮ NHẬT KÝ TRONG BỘ NHỚ (ANALYTICS & LOGS)
+# BỘ LƯU TRỮ NHẬT KÝ & ĐÁNH GIÁ NGẦM
 CHAT_LOGS = []
 FEEDBACK_LOGS = []
 
@@ -54,7 +54,7 @@ ALL_TABS = [TAB_CONFIG] + TABS_PUBLIC + [TAB_PRIVATE, TAB_LOGS]
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO HTTP CLIENT & AUTO DISCOVERY
+# KHỞI TẠO HTTP CLIENT & NẠP DỮ LIỆU
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
@@ -121,7 +121,7 @@ def get_auto_reset_minutes() -> int:
 def health_check():
     return {
         "status": "healthy", 
-        "version": "4500.0", 
+        "version": "4600.0", 
         "engine": "Synchronized Router-AI Engine",
         "auto_reset_minutes": get_auto_reset_minutes(),
         "active_cerebras_model": CEREBRAS_MODEL,
@@ -197,7 +197,6 @@ def extract_user_text_and_identity(event: dict) -> tuple:
     user_email = ""
     user_name = "Google Chat User"
     
-    # 1. Trích xuất thông tin tài khoản người dùng Google
     if isinstance(event.get("user"), dict):
         user_email = event["user"].get("email", "")
         user_name = event["user"].get("displayName", user_name)
@@ -205,7 +204,6 @@ def extract_user_text_and_identity(event: dict) -> tuple:
         user_email = event["message"]["sender"].get("email", "")
         user_name = event["message"]["sender"].get("displayName", user_name)
 
-    # 2. Trích xuất văn bản tin nhắn
     user_text = ""
     if isinstance(event.get("message"), dict):
         msg = event["message"]
@@ -251,7 +249,6 @@ def extract_device_info_from_history(messages: list) -> tuple:
 
     latest_txt = user_msgs[-1].lower()
 
-    # 1. Quét tên Model và Category trong CÂU MỚI NHẤT
     latest_model = ""
     for dev in device_models:
         if dev in latest_txt:
@@ -269,7 +266,6 @@ def extract_device_info_from_history(messages: list) -> tuple:
                 latest_category = "máy in tem"
                 break
 
-    # 2. Quét tên Model và Category trong LỊCH SỬ CŨ (Nếu câu mới chưa có)
     history_model = ""
     history_category = ""
     for m in reversed(user_msgs[:-1]):
@@ -325,23 +321,28 @@ def extract_latest_action_intent_keywords(latest_text: str) -> str:
         return "error_fix"
     return ""
 
+# ------------------------------------------------------------------------------
+# ROUTER AI + FSM MA TRẬN 3 LỚP KẾ THỪA INTENT AN TOÀN 100%
+# ------------------------------------------------------------------------------
 async def extract_latest_action_intent(messages: list) -> str:
     user_msgs = [m.get("text", "") for m in messages if m.get("role") in ["user", "Khach_Hang"]]
     if not user_msgs:
         return ""
     
-    # 🎯 FIX LỖI KẸT BỐI CẢNH: CHỈ QUÉT DUY NHẤT CÂU MỚI NHẤT DÀNH CHO ACTION INTENT
     latest_user_text = user_msgs[-1].strip()
-
+    words_in_latest = [w for w in re.sub(r'[^\w\s]', '', latest_user_text).split() if w]
+    
+    # 🎯 LỚP 1: KIỂM TRA INTENT CỦA CÂU MỚI NHẤT BẰNG ROUTER AI
+    new_intent = ""
     if HTTP_CLIENT and CEREBRAS_API_KEY and CEREBRAS_MODEL and latest_user_text:
         try:
             router_prompt = f"""Bạn là bộ phân loại ý định hỗ trợ kỹ thuật cho Sapo.
 Hãy phân loại DUY NHẤT CÂU HỎI MỚI NHẤT của khách hàng vào DUY NHẤT 1 trong các nhãn:
-- policy: Bảo hành, đổi trả, số tổng đài, hotline, sđt liên hệ, địa chỉ kho, lịch làm việc, thông tin liên hệ Sapo, quy định chung.
+- policy: Bảo hành, đổi trả, số tổng đài, hotline, sđt liên hệ, địa chỉ kho, lịch làm việc, thông tin liên hệ Sapo.
 - lan_setup: Cài đặt in qua mạng LAN, địa chỉ IP, kết nối Wifi, in qua App trên điện thoại/tablet (như xTest, Sapo App).
 - driver_setup: Tải driver, hướng dẫn cài máy tính Windows, cài Mac/macOS, kết nối USB.
 - error_fix: Báo lỗi thiết bị, sự cố kỹ thuật (không in được, kẹt giấy, in ra giấy trắng, không ra mực, kẹt dao cắt, in LAN bị chậm, hỏng hóc, sửa chữa).
-- general: Chào hỏi hoặc câu hỏi chung.
+- general: Chào hỏi, cảm ơn hoặc chỉ nêu tên model thiết bị không kèm hành động.
 
 Chỉ trả về DUY NHẤT tên nhãn (không viết thêm giải thích).
 Câu hỏi: "{latest_user_text}"
@@ -362,21 +363,46 @@ Nhãn:"""
                 intent_res = res.json()["choices"][0]["message"]["content"].strip().lower()
                 for valid_intent in ["policy", "lan_setup", "driver_setup", "error_fix"]:
                     if valid_intent in intent_res:
-                        return valid_intent
+                        new_intent = valid_intent
+                        break
         except Exception:
             pass
 
-    return extract_latest_action_intent_keywords(latest_user_text)
+    if not new_intent:
+        new_intent = extract_latest_action_intent_keywords(latest_user_text)
+
+    # Nếu câu mới đã có Intent rõ ràng (Policy / Error / Driver / LAN) ➔ Dùng luôn new_intent!
+    if new_intent in ["policy", "lan_setup", "driver_setup", "error_fix"]:
+        return new_intent
+
+    # 🎯 LỚP 2: KIỂM TRA ĐIỀU KIỆN KẾ THỪA CHO CÂU TRẢ LỜI MODEL NGẮN ("spl01 ạ", "k200l")
+    # Điều kiện: Câu ngắn (<= 4 từ) VÀ câu AI ngay trước đó đang hỏi xin tên Model máy
+    if len(words_in_latest) <= 4 and len(messages) >= 2:
+        prev_ai_msg = ""
+        for m in reversed(messages[:-1]):
+            if m.get("role") not in ["user", "Khach_Hang"]:
+                prev_ai_msg = m.get("text", "").lower()
+                break
+        
+        # Nếu câu AI trước đó đang hỏi phân loại/xin tên model
+        if any(kw in prev_ai_msg for kw in ["loại máy", "model", "tên máy", "sử dụng loại", "máy in nào"]):
+            # Dò ngược lại câu hỏi trước đó của user để lấy Intent nguyên bản
+            if len(user_msgs) >= 2:
+                prev_user_text = user_msgs[-2]
+                inherited_intent = extract_latest_action_intent_keywords(prev_user_text)
+                if inherited_intent in ["lan_setup", "driver_setup", "error_fix", "policy"]:
+                    return inherited_intent
+
+    return new_intent or "driver_setup"
 
 # ------------------------------------------------------------------------------
-# MA TRẬN ĐIỀU HƯỚNG TRÍCH XUẤT DỮ LIỆU CHÍNH XÁC (CÓ HARD FILTER)
+# MA TRẬN ĐIỀU HƯỚNG TRÍCH XUẤT DỮ LIỆU CHÍNH XÁC (HARD FILTER)
 # ------------------------------------------------------------------------------
 async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     
     user_texts = [m.get("text", "") for m in messages_list if m.get("role") in ["user", "Khach_Hang"]]
     latest_text = user_texts[-1] if user_texts else ""
-    combined_user_text = " ".join(user_texts).lower()
 
     detected_model, detected_category = extract_device_info_from_history(messages_list)
     platform_intent = extract_platform_intent(messages_list)
@@ -393,11 +419,11 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     for tab in accessible_tabs:
         if tab in [TAB_CONFIG, TAB_LOGS]: continue
         
-        # 🎯 HARD FILTER TÁCH ĐÔI KHÔNG CHO TRỘN TAB
+        # 🎯 HARD FILTER TÁCH ĐÔI TAB CHỐNG NHẦM DỮ LIỆU
         if action_intent == "error_fix" and tab == "2_HUONG_DAN_CAI_DAT":
-            continue # Khi báo lỗi, bỏ qua hoàn toàn Tab Cài đặt
+            continue # Hỏi sửa lỗi ➔ Bỏ qua hoàn toàn Tab Cài đặt
         if action_intent in ["lan_setup", "driver_setup"] and tab == "1_THIET_BI_VA_LOI":
-            continue # Khi hỏi Cài đặt, bỏ qua hoàn toàn Tab Xử lý lỗi
+            continue # Hỏi Cài đặt ➔ Bỏ qua hoàn toàn Tab Sửa lỗi
 
         for row in RAM_CACHE.get(tab, []):
             row_text = " ".join(str(v).lower() for v in row.values())
@@ -651,7 +677,7 @@ async def verify_sale(req: VerifySaleRequest):
 # ------------------------------------------------------------------------------
 class FeedbackRequest(BaseModel):
     msg_id: str
-    rating: str # "like" hoặc "dislike"
+    rating: str
     user_id: str = "Khach_Hang"
     email: str = ""
     user_question: str = ""
@@ -673,7 +699,7 @@ async def save_feedback(req: FeedbackRequest):
         "comment": req.comment
     }
     FEEDBACK_LOGS.append(log_entry)
-    print(f"📝 [FEEDBACK RECEIVED] {log_entry['rating']} từ {req.email or req.user_id}: {req.comment or req.phone}")
+    print(f"📝 [FEEDBACK LOG] {log_entry['rating']} từ {req.email or req.user_id}: {req.comment or req.phone}")
     return {"status": "success", "message": "Cảm ơn bạn đã đóng góp ý kiến!"}
 
 @app.get("/analytics")
@@ -681,7 +707,8 @@ def get_analytics():
     return {
         "total_chat_logs": len(CHAT_LOGS),
         "total_feedbacks": len(FEEDBACK_LOGS),
-        "feedbacks": FEEDBACK_LOGS[-50:]
+        "recent_logs": CHAT_LOGS[-20:],
+        "recent_feedbacks": FEEDBACK_LOGS[-20:]
     }
 
 # ------------------------------------------------------------------------------
@@ -711,7 +738,6 @@ async def chat_stream(req: ChatRequest):
         ans = await call_llm_with_history(system_instruction, req.messages)
         ans = restore_exact_urls(ans, top_matches)
         
-        # Ghi nhật ký vào bộ nhớ
         CHAT_LOGS.append({
             "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
             "channel": "Web Chat",
@@ -744,10 +770,9 @@ async def google_chat_webhook(request: Request):
 
         clean_user_q = re.sub(r'[^\w\s]', '', cleaned_message.lower()).strip()
 
-        # A. LÀM MỚI BỘ NHỚ
         reset_keywords = {
-            "0", "reset", "xóa lịch sử", "xoa lich su", "bắt đầu lại", "bat dau lai", 
-            "hỏi máy khác", "hoi may khac", "làm mới", "lam moi", "chủ đề mới", "chu de moi",
+            "0","xóa lịch sử", "xoa lich su", "bắt đầu lại", "bat dau lai", 
+            "hỏi máy khác", "hoi may khac","chủ đề mới", "chu de moi",
             "bắt đầu cuộc trò chuyện mới", "bat dau cuoc tro chuyen moi",
             "bắt đầu trò chuyện mới", "bat dau tro chuyen moi",
             "xóa lịch sử cuộc trò chuyện", "xoa lich su cuoc tro chuyen"
@@ -761,7 +786,6 @@ async def google_chat_webhook(request: Request):
         if not cleaned_message or clean_user_q in exact_quick_greetings:
             return JSONResponse(content=wrap_gsuite_addon_response(f"👋 Xin chào {user_name}! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?", show_reset_note=False))
 
-        # B. TỰ ĐỘNG RESET THEO TIMEOUT
         now = time.time()
         last_active = GOOGLE_CHAT_LAST_ACTIVE.get(space_id, 0)
         reset_minutes = get_auto_reset_minutes()
@@ -773,7 +797,6 @@ async def google_chat_webhook(request: Request):
 
         GOOGLE_CHAT_LAST_ACTIVE[space_id] = now
 
-        # C. RUN RAG
         if space_id not in GOOGLE_CHAT_HISTORY:
             GOOGLE_CHAT_HISTORY[space_id] = []
         
@@ -789,7 +812,6 @@ async def google_chat_webhook(request: Request):
 
         GOOGLE_CHAT_HISTORY[space_id].append({"role": "assistant", "text": ai_response})
 
-        # GHI NHẬT KÝ ĐẦY ĐỦ EMAIL VÀ TÊN THẬT
         CHAT_LOGS.append({
             "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
             "channel": "Google Chat",

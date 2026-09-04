@@ -87,7 +87,10 @@
         }
     </style>
 </head>
-<body class="bg-sapo-offblue h-screen flex flex-col antialiased text-slate-800">
+<body class="bg-sapo-offblue h-screen flex flex-col antialiased text-slate-800 relative overflow-hidden">
+
+    <!-- CONTAINER THÔNG BÁO TOAST TRƯỢT THÔNG MINH -->
+    <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2.5 max-w-sm w-full pointer-events-none px-4 md:px-0"></div>
 
     <!-- HEADER BRANDING SAPO -->
     <header class="bg-sapo-berkeley text-white px-5 py-3.5 flex items-center justify-between border-b border-sapo-graphite">
@@ -174,7 +177,7 @@
 
     <!-- MODAL SALE -->
     <div id="sale-auth-modal" class="fixed inset-0 bg-sapo-graphite/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
-        <div class="bg-white rounded-3xl p-6 max-w-sm w-full space-y-4 border border-slate-100">
+        <div class="bg-white rounded-3xl p-6 max-w-sm w-full space-y-4 border border-slate-100 shadow-2xl">
             <div class="text-center space-y-1">
                 <div class="w-12 h-12 bg-sapo-offblue text-sapo-blue rounded-2xl flex items-center justify-center mx-auto text-xl">
                     <i class="fa-solid fa-user-shield"></i>
@@ -205,7 +208,7 @@
 
     <!-- MODAL GÓP Ý KHI ĐÁNH GIÁ CHƯA HỮU ÍCH -->
     <div id="feedback-modal" class="fixed inset-0 bg-sapo-graphite/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
-        <div class="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 border border-slate-100">
+        <div class="bg-white rounded-3xl p-6 max-w-md w-full space-y-4 border border-slate-100 shadow-2xl">
             <div class="text-center space-y-1">
                 <div class="w-12 h-12 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto text-xl">
                     <i class="fa-regular fa-thumbs-down"></i>
@@ -246,6 +249,60 @@
         let chatHistory = [];
         let userId = "Guest_" + Math.floor(100000 + Math.random() * 900000);
 
+        // ----------------------------------------------------------------------
+        // HỆ THỐNG TOAST NOTIFICATION CHUYÊN NGHIỆP THAY THẾ ALERT
+        // ----------------------------------------------------------------------
+        function showToast(message, type = 'success') {
+            const container = document.getElementById("toast-container");
+            if (!container) return;
+
+            const toastId = "toast-" + Date.now();
+            let iconClass = "fa-circle-check text-sapo-green";
+            let borderColor = "border-sapo-green/40";
+
+            if (type === 'error') {
+                iconClass = "fa-circle-xmark text-red-500";
+                borderColor = "border-red-200";
+            } else if (type === 'info') {
+                iconClass = "fa-circle-info text-sapo-blue";
+                borderColor = "border-sapo-blue/40";
+            } else if (type === 'warning') {
+                iconClass = "fa-triangle-exclamation text-amber-500";
+                borderColor = "border-amber-200";
+            }
+
+            const toastHtml = `
+                <div id="${toastId}" class="pointer-events-auto bg-white/95 backdrop-blur-md border ${borderColor} shadow-xl rounded-2xl p-4 flex items-center gap-3 transform translate-x-full opacity-0 transition-all duration-300 ease-out">
+                    <div class="text-lg flex-shrink-0"><i class="fa-solid ${iconClass}"></i></div>
+                    <div class="flex-1 text-xs text-slate-800 font-medium leading-relaxed">${message}</div>
+                    <button onclick="dismissToast('${toastId}')" class="text-slate-400 hover:text-slate-600 text-xs p-1 transition-colors"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            `;
+
+            container.insertAdjacentHTML("beforeend", toastHtml);
+            const el = document.getElementById(toastId);
+
+            setTimeout(() => {
+                if (el) {
+                    el.classList.remove("translate-x-full", "opacity-0");
+                }
+            }, 10);
+
+            setTimeout(() => {
+                dismissToast(toastId);
+            }, 3500);
+        }
+
+        function dismissToast(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.classList.add("translate-x-full", "opacity-0");
+            setTimeout(() => el.remove(), 300);
+        }
+
+        // ----------------------------------------------------------------------
+        // KHỞI TẠO VÀ XỬ LÝ SỰ KIỆN
+        // ----------------------------------------------------------------------
         window.addEventListener("DOMContentLoaded", () => {
             const savedRole = localStorage.getItem("sapo_user_role");
             const savedEmail = localStorage.getItem("sapo_sale_email");
@@ -281,9 +338,9 @@
             try {
                 await fetch(`${BACKEND_URL}/reload`);
                 document.getElementById("last-sync-time").innerText = `Thủ công: ${getCurrentTimeString()}`;
-                alert("✅ Đã nạp thành công 100% dữ liệu mới từ Sheet!");
+                showToast("Đã nạp thành công 100% dữ liệu mới từ Google Sheet!", "success");
             } catch (err) {
-                alert("❌ Lỗi kết nối Server Backend!");
+                showToast("Lỗi kết nối Server Backend khi cập nhật dữ liệu!", "error");
             } finally {
                 icon.classList.remove("fa-spin");
             }
@@ -324,8 +381,8 @@
             const email = document.getElementById("sale-email-input").value.trim();
             const pin = document.getElementById("sale-pin-input").value.trim();
 
-            if (!email || !pin) return alert("Vui lòng nhập đầy đủ Email và Mật khẩu!");
-            if (!email.toLowerCase().endsWith("@sapo.vn")) return alert("Email bắt buộc đuôi @sapo.vn!");
+            if (!email || !pin) return showToast("Vui lòng nhập đầy đủ Email Sapo và Mật khẩu!", "warning");
+            if (!email.toLowerCase().endsWith("@sapo.vn")) return showToast("Email bắt buộc phải có đuôi @sapo.vn!", "warning");
 
             const btnSubmit = document.getElementById("btn-submit-sale");
             btnSubmit.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`;
@@ -339,12 +396,14 @@
                 if (data.success) {
                     currentSaleEmail = email;
                     localStorage.setItem("sapo_sale_email", email);
-                    setRole('Sale'); closeSaleModal(); alert("✅ " + data.message);
+                    setRole('Sale'); 
+                    closeSaleModal(); 
+                    showToast(data.message, "success");
                 } else {
-                    alert("❌ " + data.message);
+                    showToast(data.message, "error");
                 }
             } catch (err) {
-                alert("❌ Lỗi máy chủ xác thực!");
+                showToast("Lỗi máy chủ khi xác thực quyền Sale!", "error");
             } finally {
                 btnSubmit.innerHTML = `<span>Xác nhận</span>`;
             }
@@ -429,12 +488,12 @@
                 
                 chatHistory.push({ role: "model", text: fullText });
                 
-                // HIỂN THỊ THANH ĐÁNH GIÁ SAU KHI TIN NHẮN TẢI XONG
                 const actionBar = document.getElementById(`action-bar-${aiMsgId}`);
                 if (actionBar) actionBar.classList.remove("hidden");
 
             } catch (err) {
                 document.getElementById(aiMsgId).innerHTML = `<span class="text-red-500 font-semibold">❌ Lỗi kết nối Server Backend!</span>`;
+                showToast("Không thể kết nối đến máy chủ AI!", "error");
             }
         }
 
@@ -462,7 +521,7 @@
                         ai_response: aiText
                     })
                 });
-                if (rating === 'like') alert("😊 Cảm ơn anh/chị đã đánh giá câu trả lời hữu ích!");
+                if (rating === 'like') showToast("Cảm ơn anh/chị đã đánh giá câu trả lời hữu ích!", "success");
             } catch (err) {}
         }
 
@@ -493,7 +552,7 @@
             const comment = document.getElementById("fb-comment-input").value.trim();
             const contact = document.getElementById("fb-contact-input").value.trim();
 
-            if (!comment) return alert("Vui lòng nhập lý do hoặc nội dung cần góp ý!");
+            if (!comment) return showToast("Vui lòng nhập lý do hoặc nội dung cần góp ý!", "warning");
 
             const btnSubmit = document.getElementById("btn-submit-fb");
             btnSubmit.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`;
@@ -522,17 +581,20 @@
                 }
 
                 closeFeedbackModal();
-                alert("✅ Đã gửi góp ý thành công! Trợ Lý KHO xin cảm ơn đóng góp của anh/chị.");
+                showToast("Đã gửi góp ý thành công! Trợ Lý KHO xin cảm ơn đóng góp của anh/chị.", "success");
             } catch (err) {
-                alert("❌ Lỗi kết nối khi gửi góp ý!");
+                showToast("Lỗi kết nối khi gửi góp ý!", "error");
             } finally {
                 btnSubmit.innerHTML = `<span>Gửi góp ý</span>`;
             }
         }
 
         function copyToClipboard(elementId) {
-            navigator.clipboard.writeText(document.getElementById(elementId).innerText).then(() => alert("📋 Đã copy câu trả lời!"));
+            navigator.clipboard.writeText(document.getElementById(elementId).innerText).then(() => {
+                showToast("Đã copy nội dung câu trả lời vào bộ nhớ tạm!", "info");
+            });
         }
+
         function escapeHtml(text) { return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
     </script>
 </body>
