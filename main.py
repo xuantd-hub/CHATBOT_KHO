@@ -6,12 +6,13 @@ import time
 import re
 import pandas as pd
 import httpx
+from datetime import datetime
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trợ Lý KHO Sapo Synchronized Engine", version="4400.0")
+app = FastAPI(title="Trợ Lý KHO Sapo Synchronized Engine", version="4500.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,7 +22,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# CẤU HÌNH BIẾN MÔI TRƯỜNG & RAM CACHE
+# CẤU HÌNH BIẾN MÔI TRƯỜNG & RAM CACHE & NHẬT KÝ
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "").strip()
@@ -35,6 +36,10 @@ RAM_CACHE = {}
 GOOGLE_CHAT_HISTORY = {} 
 GOOGLE_CHAT_LAST_ACTIVE = {} 
 
+# BỘ LƯU TRỮ NHẬT KÝ TRONG BỘ NHỚ (ANALYTICS & LOGS)
+CHAT_LOGS = []
+FEEDBACK_LOGS = []
+
 TABS_PUBLIC = [
     "1_THIET_BI_VA_LOI", 
     "2_HUONG_DAN_CAI_DAT", 
@@ -43,12 +48,13 @@ TABS_PUBLIC = [
 ]
 TAB_PRIVATE = "4_DU_LIEU_NOI_BO"
 TAB_CONFIG = "0_CAI_DAT"
-ALL_TABS = [TAB_CONFIG] + TABS_PUBLIC + [TAB_PRIVATE]
+TAB_LOGS = "5_NHAT_KY_CHAT"
+ALL_TABS = [TAB_CONFIG] + TABS_PUBLIC + [TAB_PRIVATE, TAB_LOGS]
 
 HTTP_CLIENT: httpx.AsyncClient = None
 
 # ------------------------------------------------------------------------------
-# KHỞI TẠO HTTP CLIENT
+# KHỞI TẠO HTTP CLIENT & AUTO DISCOVERY
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
@@ -115,22 +121,20 @@ def get_auto_reset_minutes() -> int:
 def health_check():
     return {
         "status": "healthy", 
-        "version": "4400.0", 
-        "engine": "Synchronized Precision Engine",
+        "version": "4500.0", 
+        "engine": "Synchronized Router-AI Engine",
         "auto_reset_minutes": get_auto_reset_minutes(),
         "active_cerebras_model": CEREBRAS_MODEL,
         "available_cerebras_models": AVAILABLE_CEREBRAS_MODELS,
         "has_cerebras_key": bool(CEREBRAS_API_KEY),
-        "has_gemini_key": bool(GEMINI_API_KEY)
+        "has_gemini_key": bool(GEMINI_API_KEY),
+        "total_logs": len(CHAT_LOGS),
+        "total_feedbacks": len(FEEDBACK_LOGS)
     }
 
 @app.get("/reload")
 async def reload_data():
     return await load_sheet_data_async()
-
-class ChatRequest(BaseModel):
-    messages: list
-    role: str = "Khach_Hang"
 
 # ------------------------------------------------------------------------------
 # LÀM SẠCH VĂN BẢN VÀ KHÔI PHỤC LINK NGUYÊN BẢN TỰ ĐỘNG
@@ -189,36 +193,49 @@ def restore_exact_urls(text: str, top_matches: list) -> str:
     text = re.sub(r'\s*\(\s*Ví dụ\s*\)', '', text, flags=re.IGNORECASE)
     return text
 
-def extract_user_text(event: dict) -> str:
+def extract_user_text_and_identity(event: dict) -> tuple:
+    user_email = ""
+    user_name = "Google Chat User"
+    
+    # 1. Trích xuất thông tin tài khoản người dùng Google
+    if isinstance(event.get("user"), dict):
+        user_email = event["user"].get("email", "")
+        user_name = event["user"].get("displayName", user_name)
+    elif isinstance(event.get("message"), dict) and isinstance(event["message"].get("sender"), dict):
+        user_email = event["message"]["sender"].get("email", "")
+        user_name = event["message"]["sender"].get("displayName", user_name)
+
+    # 2. Trích xuất văn bản tin nhắn
+    user_text = ""
     if isinstance(event.get("message"), dict):
         msg = event["message"]
-        if msg.get("text"): return msg["text"]
-        if msg.get("argumentText"): return msg["argumentText"]
+        if msg.get("text"): user_text = msg["text"]
+        elif msg.get("argumentText"): user_text = msg["argumentText"]
 
-    if isinstance(event.get("chat"), dict):
+    if not user_text and isinstance(event.get("chat"), dict):
         chat = event["chat"]
         if isinstance(chat.get("messagePayload"), dict) and isinstance(chat["messagePayload"].get("message"), dict):
             m = chat["messagePayload"]["message"]
-            if m.get("text"): return m["text"]
-            if m.get("argumentText"): return m["argumentText"]
-        if isinstance(chat.get("message"), dict):
+            user_text = m.get("text") or m.get("argumentText") or ""
+        elif isinstance(chat.get("message"), dict):
             m = chat["message"]
-            if m.get("text"): return m["text"]
-            if m.get("argumentText"): return m["argumentText"]
+            user_text = m.get("text") or m.get("argumentText") or ""
 
-    def deep_search(obj):
-        if isinstance(obj, dict):
-            if "argumentText" in obj and isinstance(obj["argumentText"], str) and obj["argumentText"].strip():
-                return obj["argumentText"]
-            if "text" in obj and isinstance(obj["text"], str) and obj["text"].strip():
-                if not obj["text"].startswith("spaces/"):
-                    return obj["text"]
-            for v in obj.values():
-                res = deep_search(v)
-                if res: return res
-        return ""
+    if not user_text:
+        def deep_search(obj):
+            if isinstance(obj, dict):
+                if "argumentText" in obj and isinstance(obj["argumentText"], str) and obj["argumentText"].strip():
+                    return obj["argumentText"]
+                if "text" in obj and isinstance(obj["text"], str) and obj["text"].strip():
+                    if not obj["text"].startswith("spaces/"):
+                        return obj["text"]
+                for v in obj.values():
+                    res = deep_search(v)
+                    if res: return res
+            return ""
+        user_text = deep_search(event)
 
-    return deep_search(event)
+    return user_text, user_email, user_name
 
 # ------------------------------------------------------------------------------
 # QUÉT BỐI CẢNH MODEL VÀ CATEGORY THÔNG MINH
@@ -252,7 +269,7 @@ def extract_device_info_from_history(messages: list) -> tuple:
                 latest_category = "máy in tem"
                 break
 
-    # 2. Quét tên Model và Category trong LỊCH SỬ CŨ
+    # 2. Quét tên Model và Category trong LỊCH SỬ CŨ (Nếu câu mới chưa có)
     history_model = ""
     history_category = ""
     for m in reversed(user_msgs[:-1]):
@@ -272,7 +289,6 @@ def extract_device_info_from_history(messages: list) -> tuple:
                     history_category = "máy in tem"
                     break
 
-    # LOGIC XỬ LÝ BỐI CẢNH
     if latest_model:
         cat = latest_category or history_category or ""
         return latest_model, cat
@@ -297,18 +313,16 @@ def extract_platform_intent(messages: list) -> str:
                 return "mobile"
     return ""
 
-def extract_latest_action_intent_keywords(messages: list) -> str:
-    for m in reversed(messages):
-        if m.get("role") in ["user", "Khach_Hang"]:
-            txt = m.get("text", "").lower()
-            if any(k in txt for k in ["bảo hành", "đổi trả", "chính sách", "thu hồi", "tổng đài", "hotline", "sđt", "liên hệ", "địa chỉ", "kho", "sổ", "admin", "tỉnh"]):
-                return "policy"
-            if any(k in txt for k in ["lan", "ip", "mạng", "wifi", "app", "xtest", "điện thoại"]):
-                return "lan_setup"
-            if any(k in txt for k in ["driver", "cài", "setup", "máy tính", "windows", "mac"]):
-                return "driver_setup"
-            if any(k in txt for k in ["lỗi", "không", "kẹt", "hư", "trắng", "mực", "cắt", "sửa", "ra mực", "không ra"]):
-                return "error_fix"
+def extract_latest_action_intent_keywords(latest_text: str) -> str:
+    txt = latest_text.lower()
+    if any(k in txt for k in ["bảo hành", "đổi trả", "chính sách", "thu hồi", "tổng đài", "hotline", "sđt", "liên hệ", "địa chỉ", "kho", "sổ", "admin", "tỉnh"]):
+        return "policy"
+    if any(k in txt for k in ["lan", "ip", "mạng", "wifi", "app", "xtest", "điện thoại"]):
+        return "lan_setup"
+    if any(k in txt for k in ["driver", "cài", "setup", "máy tính", "windows", "mac"]):
+        return "driver_setup"
+    if any(k in txt for k in ["lỗi", "không", "kẹt", "hư", "trắng", "mực", "cắt", "sửa", "ra mực", "không ra", "chậm"]):
+        return "error_fix"
     return ""
 
 async def extract_latest_action_intent(messages: list) -> str:
@@ -316,20 +330,21 @@ async def extract_latest_action_intent(messages: list) -> str:
     if not user_msgs:
         return ""
     
-    combined_recent_text = " ".join(user_msgs[-3:]).strip()
+    # 🎯 FIX LỖI KẸT BỐI CẢNH: CHỈ QUÉT DUY NHẤT CÂU MỚI NHẤT DÀNH CHO ACTION INTENT
+    latest_user_text = user_msgs[-1].strip()
 
-    if HTTP_CLIENT and CEREBRAS_API_KEY and CEREBRAS_MODEL and combined_recent_text:
+    if HTTP_CLIENT and CEREBRAS_API_KEY and CEREBRAS_MODEL and latest_user_text:
         try:
             router_prompt = f"""Bạn là bộ phân loại ý định hỗ trợ kỹ thuật cho Sapo.
-Hãy phân loại đoạn hội thoại sau của khách hàng vào DUY NHẤT 1 trong các nhãn:
+Hãy phân loại DUY NHẤT CÂU HỎI MỚI NHẤT của khách hàng vào DUY NHẤT 1 trong các nhãn:
 - policy: Bảo hành, đổi trả, số tổng đài, hotline, sđt liên hệ, địa chỉ kho, lịch làm việc, thông tin liên hệ Sapo, quy định chung.
 - lan_setup: Cài đặt in qua mạng LAN, địa chỉ IP, kết nối Wifi, in qua App trên điện thoại/tablet (như xTest, Sapo App).
-- driver_setup: Tải driver, cài máy tính Windows, cài Mac/macOS.
-- error_fix: Báo lỗi thiết bị (không in được, kẹt giấy, in ra giấy trắng, không ra mực, kẹt dao cắt, hỏng hóc, sửa chữa).
+- driver_setup: Tải driver, hướng dẫn cài máy tính Windows, cài Mac/macOS, kết nối USB.
+- error_fix: Báo lỗi thiết bị, sự cố kỹ thuật (không in được, kẹt giấy, in ra giấy trắng, không ra mực, kẹt dao cắt, in LAN bị chậm, hỏng hóc, sửa chữa).
 - general: Chào hỏi hoặc câu hỏi chung.
 
 Chỉ trả về DUY NHẤT tên nhãn (không viết thêm giải thích).
-Đoạn hội thoại: "{combined_recent_text}"
+Câu hỏi: "{latest_user_text}"
 Nhãn:"""
 
             res = await HTTP_CLIENT.post(
@@ -351,33 +366,39 @@ Nhãn:"""
         except Exception:
             pass
 
-    return extract_latest_action_intent_keywords(messages)
+    return extract_latest_action_intent_keywords(latest_user_text)
 
 # ------------------------------------------------------------------------------
-# MA TRẬN ĐIỀU HƯỚNG TRÍCH XUẤT DỮ LIỆU CHÍNH XÁC
+# MA TRẬN ĐIỀU HƯỚNG TRÍCH XUẤT DỮ LIỆU CHÍNH XÁC (CÓ HARD FILTER)
 # ------------------------------------------------------------------------------
 async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
     accessible_tabs = ALL_TABS if role == "Sale" else TABS_PUBLIC
     
     user_texts = [m.get("text", "") for m in messages_list if m.get("role") in ["user", "Khach_Hang"]]
+    latest_text = user_texts[-1] if user_texts else ""
     combined_user_text = " ".join(user_texts).lower()
 
     detected_model, detected_category = extract_device_info_from_history(messages_list)
     platform_intent = extract_platform_intent(messages_list)
     action_intent = await extract_latest_action_intent(messages_list)
     
-    # 🎯 ĐIỀU CHỈNH CHỐNG LỖI MẤT CÂU HỎI MODEL:
-    # CHỈ KHI CÓ MODEL CỤ THỂ HOẶC HỎI CHÍNH SÁCH CHUNG THÌ MỚI ĐỌC LÀ HAS_DEVICE_INFO = TRUE
     has_device_info = bool(detected_model) or (action_intent == "policy")
 
     stop_words = {"mình", "có", "bị", "được", "không", "cho", "với", "là", "và", "nhé", "ạ", "cần", "giúp", "tôi", "xin", "lỗi", "thế", "nào", "bao", "nhiêu", "thông", "số", "qua", "đã", "ok", "rồi", "nhưng", "lại", "muốn"}
-    words = [w for w in combined_user_text.split() if len(w) > 1 and w not in stop_words]
+    words = [w for w in latest_text.lower().split() if len(w) > 1 and w not in stop_words]
 
     tech_rows = []    
     policy_rows = []  
 
     for tab in accessible_tabs:
-        if tab == TAB_CONFIG: continue
+        if tab in [TAB_CONFIG, TAB_LOGS]: continue
+        
+        # 🎯 HARD FILTER TÁCH ĐÔI KHÔNG CHO TRỘN TAB
+        if action_intent == "error_fix" and tab == "2_HUONG_DAN_CAI_DAT":
+            continue # Khi báo lỗi, bỏ qua hoàn toàn Tab Cài đặt
+        if action_intent in ["lan_setup", "driver_setup"] and tab == "1_THIET_BI_VA_LOI":
+            continue # Khi hỏi Cài đặt, bỏ qua hoàn toàn Tab Xử lý lỗi
+
         for row in RAM_CACHE.get(tab, []):
             row_text = " ".join(str(v).lower() for v in row.values())
             score = 0
@@ -387,23 +408,23 @@ async def get_high_precision_knowledge(messages_list: list, role: str) -> tuple:
                     score += 25
 
             if tab in ["3_CHINH_SACH_SAPO", "4_DU_LIEU_NOI_BO"]:
-                score += 300  
+                score += 100  
                 if action_intent == "policy":
-                    score += 1000
+                    score += 2000
                 if score > 0:
                     policy_rows.append((score, tab, row))
 
             elif tab == "1_THIET_BI_VA_LOI":
-                if detected_model and detected_model in row_text: score += 300
+                if detected_model and detected_model in row_text: score += 500
                 if detected_category and detected_category in row_text: score += 150
-                if action_intent == "error_fix": score += 1000
+                if action_intent == "error_fix": score += 2000
                 if score > 0: tech_rows.append((score, tab, row))
 
             elif tab == "2_HUONG_DAN_CAI_DAT":
-                if detected_model and detected_model in row_text: score += 300
+                if detected_model and detected_model in row_text: score += 500
                 if detected_category and detected_category in row_text: score += 150
-                row_thao_tac = str(row.get("Loai_Thao_Tac", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower() + " " + str(row.get("Noi_Dung_Huong_Dan", "")).lower()
-                if action_intent in ["lan_setup", "driver_setup"]: score += 1000
+                row_thao_tac = str(row.get("Loai_Thao_Tac", "")).lower() + " " + str(row.get("Tu_Khoa_Nhan_Dien", "")).lower()
+                if action_intent in ["lan_setup", "driver_setup"]: score += 2000
                 if platform_intent == "mac" and "mac" in row_thao_tac: score += 300
                 elif platform_intent == "windows" and ("win" in row_thao_tac or "windows" in row_thao_tac): score += 300
                 if score > 0: tech_rows.append((score, tab, row))
@@ -560,18 +581,17 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
     return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
 
 # ------------------------------------------------------------------------------
-# HÀM WRAPPER GỬI TIN NHẮN DÀNH CHO WORKSPACE ADD-ON (GHI CHÚ NGẮN TỰ NHIÊN)
+# HÀM WRAPPER GỬI TIN NHẮN DÀNH CHO WORKSPACE ADD-ON
 # ------------------------------------------------------------------------------
 def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) -> dict:
     clean_text = clean_thinking_process(text_message)
     clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', clean_text)
     clean_text = re.sub(r'\*{2,3}', '*', clean_text)
     
-    # DÒNG HƯỚNG DẪN IN NGHIÊNG NHỎ GỌN TỰ NHIÊN Ở CHÂN TRANG
     if show_reset_note and "Em đã xóa bộ nhớ" not in clean_text:
         footer_note = (
             "\n\n───────────────────────────────\n"
-            " 💡 _Mẹo: Để thông tin được đảm bảo chính xác. Bạn nhắn \"xóa lịch sử\" hoặc \"bắt đầu cuộc trò chuyện mới\" khi cần hỏi thông tin khác luồng đang trao đổi nhé!_"
+            " 💡 _Mẹo: Bạn có thể nhắn \"xóa lịch sử\" hoặc \"bắt đầu cuộc trò chuyện mới\" khi cần hỏi sang thiết bị/chủ đề khác nhé!_"
         )
         clean_text += footer_note
 
@@ -588,13 +608,10 @@ def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) 
     }
 
 # ------------------------------------------------------------------------------
-# HÀM LẤY TẤT CẢ MẬT KHẨU SALE HỢP LỆ (CHO PHÉP DÙNG NGHỆP VỤ + DỰ PHÒNG)
+# XÁC THỰC MẬT KHẨU SALE
 # ------------------------------------------------------------------------------
 def get_valid_sale_passcodes() -> list:
-    # 1. Mật khẩu dự phòng cố định (luôn mở cửa để không bao giờ bị khóa)
     valid_codes = ["sapo123", "sapo2026", "sapo@2026", "123456"]
-    
-    # 2. Đọc bổ sung mật khẩu từ Google Sheet (Tab 0_CAI_DAT)
     cai_dat_records = RAM_CACHE.get(TAB_CONFIG, [])
     if cai_dat_records:
         for row in cai_dat_records:
@@ -602,31 +619,22 @@ def get_valid_sale_passcodes() -> list:
             row_text = " ".join(vals).lower()
             if any(kw in row_text for kw in ["mat_khau", "passcode", "pin", "sale"]):
                 for v in vals:
-                    # Bỏ qua tên khóa, lấy giá trị mật khẩu trên Sheet
                     if v.lower() not in ["mat_khau_sale", "mat_khau", "passcode", "0_cai_dat"]:
                         valid_codes.append(v)
-    
-    # 3. Chuẩn hóa về chữ viết thường và xóa khoảng trắng thừa
     return [c.strip().lower() for c in valid_codes if c.strip()]
 
-# ------------------------------------------------------------------------------
-# ENDPOINT XÁC THỰC MẬT KHẨU SALE NỘI BỘ (THÔNG MINH & DỄ TÍNH)
-# ------------------------------------------------------------------------------
 class VerifySaleRequest(BaseModel):
     email: str
     passcode: str
 
 @app.post("/verify-sale")
 async def verify_sale(req: VerifySaleRequest):
-    # 1. Kiểm tra định dạng Email @sapo.vn
     if not req.email.lower().strip().endswith("@sapo.vn"):
         return {"success": False, "message": "Email bắt buộc phải có đuôi @sapo.vn!"}
     
-    # 2. Lấy danh sách các mật khẩu được chấp nhận
     allowed_passcodes = get_valid_sale_passcodes()
     user_input_pass = req.passcode.strip().lower()
     
-    # 3. So sánh
     if user_input_pass in allowed_passcodes:
         return {
             "success": True, 
@@ -637,9 +645,54 @@ async def verify_sale(req: VerifySaleRequest):
             "success": False, 
             "message": "Mật khẩu Sale nội bộ không chính xác!"
         }
+
+# ------------------------------------------------------------------------------
+# API ĐÁNH GIÁ PHẢN HỒI (FEEDBACK & LOGGING)
+# ------------------------------------------------------------------------------
+class FeedbackRequest(BaseModel):
+    msg_id: str
+    rating: str # "like" hoặc "dislike"
+    user_id: str = "Khach_Hang"
+    email: str = ""
+    user_question: str = ""
+    ai_response: str = ""
+    comment: str = ""
+    phone: str = ""
+
+@app.post("/feedback")
+async def save_feedback(req: FeedbackRequest):
+    log_entry = {
+        "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+        "msg_id": req.msg_id,
+        "rating": "👍 Hữu ích" if req.rating == "like" else "👎 Không hữu ích",
+        "user_id": req.user_id,
+        "email": req.email,
+        "phone": req.phone,
+        "question": req.user_question,
+        "response": req.ai_response[:200] + "..." if len(req.ai_response) > 200 else req.ai_response,
+        "comment": req.comment
+    }
+    FEEDBACK_LOGS.append(log_entry)
+    print(f"📝 [FEEDBACK RECEIVED] {log_entry['rating']} từ {req.email or req.user_id}: {req.comment or req.phone}")
+    return {"status": "success", "message": "Cảm ơn bạn đã đóng góp ý kiến!"}
+
+@app.get("/analytics")
+def get_analytics():
+    return {
+        "total_chat_logs": len(CHAT_LOGS),
+        "total_feedbacks": len(FEEDBACK_LOGS),
+        "feedbacks": FEEDBACK_LOGS[-50:]
+    }
+
 # ------------------------------------------------------------------------------
 # 1. CỔNG WEB CHAT (/chat)
 # ------------------------------------------------------------------------------
+class ChatRequest(BaseModel):
+    messages: list
+    role: str = "Khach_Hang"
+    user_id: str = "Guest_Web"
+    user_email: str = ""
+
 @app.post("/chat")
 async def chat_stream(req: ChatRequest):
     latest_msg = req.messages[-1]["text"] if req.messages else ""
@@ -657,29 +710,41 @@ async def chat_stream(req: ChatRequest):
     async def generate_response_stream():
         ans = await call_llm_with_history(system_instruction, req.messages)
         ans = restore_exact_urls(ans, top_matches)
+        
+        # Ghi nhật ký vào bộ nhớ
+        CHAT_LOGS.append({
+            "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+            "channel": "Web Chat",
+            "user_id": req.user_id,
+            "email": req.user_email,
+            "role": req.role,
+            "question": latest_msg,
+            "answer_preview": ans[:150]
+        })
+        
         yield ans
 
     return StreamingResponse(generate_response_stream(), media_type="text/plain")
 
 # ------------------------------------------------------------------------------
-# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - ĐỒNG BỘ NGUYÊN TẮC HỎI MODEL
+# 2. CỔNG GOOGLE CHAT BOT (/google-chat) - BẮT EMAIL CHÍNH XÁC
 # ------------------------------------------------------------------------------
 @app.post("/google-chat")
 async def google_chat_webhook(request: Request):
     try:
         event = await request.json()
-        user_message = extract_user_text(event)
+        user_message, user_email, user_name = extract_user_text_and_identity(event)
         cleaned_message = re.sub(r'<.*?>', '', user_message).replace("@Trợ Lý KHO Sapo", "").strip()
 
         space_id = event.get("space", {}).get("name") or event.get("user", {}).get("name") or "default_space"
 
         event_type = event.get("type") or event.get("chat", {}).get("type") or ""
         if event_type == "ADDED_TO_SPACE":
-            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!", show_reset_note=False))
+            return JSONResponse(content=wrap_gsuite_addon_response(f"👋 Xin chào {user_name}! Em là Trợ Lý KHO Sapo. Hãy gõ tên thiết bị hoặc câu hỏi để em hỗ trợ ngay 24/7!", show_reset_note=False))
 
         clean_user_q = re.sub(r'[^\w\s]', '', cleaned_message.lower()).strip()
 
-        # A. NHẬN DIỆN MỌI CÂU LỆNH CHỮ LÀM MỚI BỘ NHỚ
+        # A. LÀM MỚI BỘ NHỚ
         reset_keywords = {
             "0", "reset", "xóa lịch sử", "xoa lich su", "bắt đầu lại", "bat dau lai", 
             "hỏi máy khác", "hoi may khac", "làm mới", "lam moi", "chủ đề mới", "chu de moi",
@@ -694,9 +759,9 @@ async def google_chat_webhook(request: Request):
 
         exact_quick_greetings = {"chào", "chào bạn", "chào bjan", "hi", "hello", "chaof bạn", "chao ban", "alo", "chào em", "chao ban nhe", "xin chào"}
         if not cleaned_message or clean_user_q in exact_quick_greetings:
-            return JSONResponse(content=wrap_gsuite_addon_response("👋 Xin chào! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?", show_reset_note=False))
+            return JSONResponse(content=wrap_gsuite_addon_response(f"👋 Xin chào {user_name}! Em là Trợ Lý KHO Sapo. Anh/chị cần hỗ trợ tra cứu thông số máy in hay cài đặt thiết bị nào ạ?", show_reset_note=False))
 
-        # B. TỰ ĐỘNG LÀM SẠCH BỘ NHỚ THEO THỜI GIAN RẢNH (TTL DYNAMIC TỪ SHEET)
+        # B. TỰ ĐỘNG RESET THEO TIMEOUT
         now = time.time()
         last_active = GOOGLE_CHAT_LAST_ACTIVE.get(space_id, 0)
         reset_minutes = get_auto_reset_minutes()
@@ -708,7 +773,7 @@ async def google_chat_webhook(request: Request):
 
         GOOGLE_CHAT_LAST_ACTIVE[space_id] = now
 
-        # C. LƯU THOẠI VÀ CHẠY RAG CÙNG BỐI CẢNH 4 TẦNG THÔNG MINH
+        # C. RUN RAG
         if space_id not in GOOGLE_CHAT_HISTORY:
             GOOGLE_CHAT_HISTORY[space_id] = []
         
@@ -723,6 +788,17 @@ async def google_chat_webhook(request: Request):
         ai_response = restore_exact_urls(ai_response, top_matches)
 
         GOOGLE_CHAT_HISTORY[space_id].append({"role": "assistant", "text": ai_response})
+
+        # GHI NHẬT KÝ ĐẦY ĐỦ EMAIL VÀ TÊN THẬT
+        CHAT_LOGS.append({
+            "timestamp": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+            "channel": "Google Chat",
+            "user_id": user_name,
+            "email": user_email or "Workspace User",
+            "role": "Sale",
+            "question": cleaned_message,
+            "answer_preview": ai_response[:150]
+        })
 
         return JSONResponse(content=wrap_gsuite_addon_response(ai_response, show_reset_note=True))
 
