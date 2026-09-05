@@ -653,74 +653,99 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
     return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
 
 # ------------------------------------------------------------------------------
-# HÀM CHUẨN HÓA VĂN BẢN & WRAPPER CARD V2 DÀNH CHO GOOGLE CHAT (AN TOÀN 100%)
+# HÀM BỌC CARD V2 THÔNG MINH - CHUYỂN NÚT BẤM VỀ ĐÚNG VỊ TRÍ DƯỚI LINK (GOOGLE CHAT)
 # ------------------------------------------------------------------------------
-def format_text_for_google_chat(text: str) -> tuple:
+def get_button_label(url: str, context_line: str = "") -> str:
+    combined = (url + " " + context_line).lower()
+    if "youtube" in combined or "youtu.be" in combined or "video" in combined:
+        return "🎥 Xem Video Hướng Dẫn"
+    elif "win" in combined or "windows" in combined:
+        return "💻 Tải Driver Windows"
+    elif "mac" in combined or "macos" in combined:
+        return "🍏 Tải Driver Mac"
+    elif "docs.google.com/document" in combined or "bài viết" in combined:
+        return "📄 Xem Bài Viết Hướng Dẫn"
+    elif "drive.google.com" in combined or "tải" in combined or "download" in combined:
+        return "📥 Tải File Driver / Tài Liệu"
+    elif "anh" in combined or "img" in combined or "image" in combined or "png" in combined or "jpg" in combined:
+        return "🖼️ Xem Ảnh Minh Họa"
+    else:
+        return "🔗 Mở Liên Kết Hướng Dẫn"
+
+
+def build_google_chat_widgets(text: str, show_reset_note: bool = True) -> list:
     clean_text = clean_thinking_process(text)
     
-    buttons = []
-    extracted_urls = set()
-    url_matches = re.findall(r'https?://[^\s\)\>\]]+', clean_text)
-    
-    for url in url_matches:
-        clean_url = url.rstrip('.,;')
-        if clean_url in extracted_urls:
-            continue
-        extracted_urls.add(clean_url)
-        
-        url_lower = clean_url.lower()
-        if "youtube.com" in url_lower or "youtu.be" in url_lower or "video" in url_lower:
-            label = "🎥 Xem Video Hướng Dẫn"
-        elif "win" in url_lower or "driver_win" in url_lower:
-            label = "💻 Tải Driver Windows"
-        elif "mac" in url_lower or "driver_mac" in url_lower:
-            label = "🍏 Tải Driver Mac"
-        elif "drive.google.com" in url_lower or "doc" in url_lower or "guide" in url_lower:
-            label = "📄 Xem Tài Liệu Hướng Dẫn"
-        elif "anh" in url_lower or "img" in url_lower or "png" in url_lower or "jpg" in url_lower:
-            label = "🖼️ Xem Ảnh Minh Họa"
-        else:
-            label = "🔗 Mở Liên Kết Hướng Dẫn"
-            
-        buttons.append({
-            "text": label,
-            "onClick": {
-                "openLink": {
-                    "url": clean_url
-                }
-            }
-        })
-
-    formatted_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'<\2|\1>', clean_text)
-    formatted_text = re.sub(r'\*{2,3}(.*?)\*{2,3}', r'*\1*', formatted_text)
-    
-    return formatted_text, buttons
-
-
-def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) -> dict:
-    formatted_text, buttons = format_text_for_google_chat(text_message)
-    
-    if show_reset_note and "Em đã xóa bộ nhớ" not in formatted_text:
+    if show_reset_note and "Em đã xóa bộ nhớ" not in clean_text:
         footer_note = (
             "\n\n───────────────────────────────\n"
             "💡 _Mẹo: Bạn có thể nhắn \"xóa lịch sử\" khi cần hỏi sang thiết bị/chủ đề khác nhé!_"
         )
-        formatted_text += footer_note
+        clean_text += footer_note
 
-    widgets = [
-        {
-            "textParagraph": {
-                "text": formatted_text
-            }
-        }
-    ]
+    lines = clean_text.split('\n')
+    widgets = []
+    current_text_lines = []
     
-    if buttons:
+    for line in lines:
+        url_match = re.search(r'https?://[^\s\)\>\]]+', line)
+        if url_match:
+            url = url_match.group(0).rstrip('.,;')
+            line_without_url = line.replace(url, '').strip()
+            
+            context_line = line_without_url
+            if not context_line and current_text_lines:
+                context_line = current_text_lines[-1]
+            
+            if line_without_url:
+                current_text_lines.append(line_without_url)
+                
+            if current_text_lines:
+                text_block = "\n".join(current_text_lines)
+                text_block = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'<\2|\1>', text_block)
+                text_block = re.sub(r'\*{2,3}(.*?)\*{2,3}', r'*\1*', text_block)
+                
+                widgets.append({
+                    "textParagraph": {
+                        "text": text_block
+                    }
+                })
+                current_text_lines = []
+            
+            label = get_button_label(url, context_line)
+            
+            widgets.append({
+                "buttonList": {
+                    "buttons": [
+                        {
+                            "text": label,
+                            "onClick": {
+                                "openLink": {
+                                    "url": url
+                                }
+                            }
+                        }
+                    ]
+                }
+            })
+        else:
+            current_text_lines.append(line)
+            
+    if current_text_lines:
+        text_block = "\n".join(current_text_lines)
+        text_block = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'<\2|\1>', text_block)
+        text_block = re.sub(r'\*{2,3}(.*?)\*{2,3}', r'*\1*', text_block)
         widgets.append({
-            "buttonList": {
-                "buttons": buttons
+            "textParagraph": {
+                "text": text_block
             }
         })
+        
+    return widgets
+
+
+def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) -> dict:
+    widgets = build_google_chat_widgets(text_message, show_reset_note)
 
     card_v2 = {
         "cardId": "sapo_assistant_reply_card",
@@ -739,7 +764,6 @@ def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) 
         }
     }
 
-    # Bỏ trường "text" dư thừa, chỉ giữ lại "cardsV2" để hiển thị 1 khung duy nhất
     return {
         "hostAppDataAction": {
             "chatDataAction": {
