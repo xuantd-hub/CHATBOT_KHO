@@ -49,13 +49,6 @@
             text-align: left;
         }
 
-        .markdown-body a {
-            word-break: break-all;
-            color: #007AFF;
-            font-weight: 600;
-            text-decoration: underline;
-        }
-
         .markdown-body p { margin-bottom: 0.6rem; line-height: 1.6; }
         .markdown-body ul, .markdown-body ol { margin-left: 1.25rem; margin-bottom: 0.6rem; }
         .markdown-body ul { list-style-type: disc; }
@@ -155,9 +148,9 @@
         </div>
     </main>
 
-    <!-- THANH NHẬP -->
-    <footer class="bg-white border-t border-slate-200 p-3.5 max-w-4xl mx-auto w-full">
-        <form id="chat-form" onsubmit="sendMessage(event)" class="flex items-center gap-2.5">
+    <!-- THANH NHẬP KÈM DÒNG CẢNH BÁO CHÂN TRANG -->
+    <footer class="bg-white border-t border-slate-200 p-3.5 max-w-4xl mx-auto w-full flex flex-col items-center">
+        <form id="chat-form" onsubmit="sendMessage(event)" class="flex items-center gap-2.5 w-full">
             <input 
                 type="text" 
                 id="user-input" 
@@ -173,6 +166,11 @@
                 <span>Gửi</span> <i class="fa-solid fa-paper-plane text-xs"></i>
             </button>
         </form>
+
+        <!-- DÒNG CẢNH BÁO THEO GIAO DIỆN KHÔI PHỤC -->
+        <p class="text-[11px] text-slate-400 text-center mt-2.5 font-normal tracking-wide">
+            Phản hồi có thể chưa hoàn toàn chính xác trong một số trường hợp. Hãy kiểm tra kỹ trước khi thực hiện.
+        </p>
     </footer>
 
     <!-- MODAL SALE -->
@@ -250,7 +248,32 @@
         let userId = "Guest_" + Math.floor(100000 + Math.random() * 900000);
 
         // ----------------------------------------------------------------------
-        // HỆ THỐNG TOAST NOTIFICATION CHUYÊN NGHIỆP THAY THẾ ALERT
+        // CẤU HÌNH MEDIA CARD PREVIEW (#4) CHO MARKED.JS
+        // ----------------------------------------------------------------------
+        const renderer = new marked.Renderer();
+        renderer.link = function(href, title, text) {
+            const linkUrl = (typeof href === 'object') ? href.href : href;
+            const linkText = (typeof href === 'object') ? href.text : text;
+            const textLower = linkText.toLowerCase();
+            const urlLower = linkUrl.toLowerCase();
+
+            // Nếu là Link Video (YouTube)
+            if (urlLower.includes("youtube.com") || urlLower.includes("youtu.be") || textLower.includes("video")) {
+                return `<div class="my-2"><a href="${linkUrl}" target="_blank" rel="noopener font-semibold" class="inline-flex items-center gap-2.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200/80 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all shadow-2xs"><i class="fa-brands fa-youtube text-base text-red-500"></i><span>${linkText}</span><i class="fa-solid fa-arrow-up-right-from-square text-[10px] opacity-70"></i></a></div>`;
+            } 
+            // Nếu là Link Driver / File Google Drive
+            else if (urlLower.includes("drive.google.com") || textLower.includes("driver") || textLower.includes("tải")) {
+                return `<div class="my-2"><a href="${linkUrl}" target="_blank" rel="noopener font-semibold" class="inline-flex items-center gap-2.5 bg-blue-50 hover:bg-blue-100 text-sapo-blue border border-blue-200/80 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all shadow-2xs"><i class="fa-solid fa-file-arrow-down text-base text-sapo-blue"></i><span>${linkText}</span><i class="fa-solid fa-arrow-up-right-from-square text-[10px] opacity-70"></i></a></div>`;
+            } 
+            // Link Bài viết / Tài liệu chung
+            else {
+                return `<div class="my-2"><a href="${linkUrl}" target="_blank" rel="noopener font-semibold" class="inline-flex items-center gap-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all shadow-2xs"><i class="fa-solid fa-file-lines text-sapo-blue"></i><span>${linkText}</span><i class="fa-solid fa-arrow-up-right-from-square text-[10px] opacity-70"></i></a></div>`;
+            }
+        };
+        marked.setOptions({ renderer: renderer });
+
+        // ----------------------------------------------------------------------
+        // TOAST NOTIFICATION
         // ----------------------------------------------------------------------
         function showToast(message, type = 'success') {
             const container = document.getElementById("toast-container");
@@ -282,15 +305,8 @@
             container.insertAdjacentHTML("beforeend", toastHtml);
             const el = document.getElementById(toastId);
 
-            setTimeout(() => {
-                if (el) {
-                    el.classList.remove("translate-x-full", "opacity-0");
-                }
-            }, 10);
-
-            setTimeout(() => {
-                dismissToast(toastId);
-            }, 3500);
+            setTimeout(() => { if (el) el.classList.remove("translate-x-full", "opacity-0"); }, 10);
+            setTimeout(() => { dismissToast(toastId); }, 3500);
         }
 
         function dismissToast(id) {
@@ -312,14 +328,6 @@
                 setRole("Sale");
             }
         });
-
-        const renderer = new marked.Renderer();
-        renderer.link = function(href, title, text) {
-            const linkUrl = (typeof href === 'object') ? href.href : href;
-            const linkText = (typeof href === 'object') ? href.text : text;
-            return `<a href="${linkUrl}" target="_blank" rel="noopener noreferrer" class="text-sapo-blue underline font-semibold hover:text-sapo-polynesian transition-colors inline-flex items-center gap-1">${linkText} <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i></a>`;
-        };
-        marked.setOptions({ renderer: renderer });
 
         function getCurrentTimeString() {
             return new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -414,6 +422,35 @@
             sendMessage(new Event('submit'));
         }
 
+        // ----------------------------------------------------------------------
+        // TẠO NÚT GỢI Ý HÀNH ĐỘNG TIẾP THEO (SMART ACTION CHIPS - #1)
+        // ----------------------------------------------------------------------
+        function generateSmartActionChips(msgId, fullText) {
+            const textLower = fullText.toLowerCase();
+            let chipsHtml = "";
+
+            if (textLower.includes("k200l")) {
+                chipsHtml += `<button onclick="quickAsk('Cách sửa lỗi kẹt dao máy in K200L')" class="bg-sapo-offblue hover:bg-sapo-blue/10 text-sapo-blue px-3 py-1 rounded-xl border border-sapo-blue/30 transition-all font-medium flex items-center gap-1"><i class="fa-solid fa-scissors text-[10px]"></i> Sửa kẹt dao K200L</button>`;
+            }
+            if (textLower.includes("spl01")) {
+                chipsHtml += `<button onclick="quickAsk('Cách thiết lập khổ giấy máy in tem SPL01')" class="bg-sapo-offblue hover:bg-sapo-blue/10 text-sapo-blue px-3 py-1 rounded-xl border border-sapo-blue/30 transition-all font-medium flex items-center gap-1"><i class="fa-solid fa-sliders text-[10px]"></i> Chỉnh khổ tem SPL01</button>`;
+            }
+            if (textLower.includes("cài đặt") || textLower.includes("driver")) {
+                chipsHtml += `<button onclick="quickAsk('Cho mình xin video hướng dẫn cài đặt chi tiết')" class="bg-sapo-offblue hover:bg-sapo-blue/10 text-sapo-blue px-3 py-1 rounded-xl border border-sapo-blue/30 transition-all font-medium flex items-center gap-1"><i class="fa-solid fa-circle-play text-[10px]"></i> Xem Video cài đặt</button>`;
+            }
+            if (textLower.includes("bảo hành") || textLower.includes("lỗi")) {
+                chipsHtml += `<button onclick="quickAsk('Địa chỉ kho bảo hành Sapo ở đâu')" class="bg-sapo-offblue hover:bg-sapo-blue/10 text-sapo-blue px-3 py-1 rounded-xl border border-sapo-blue/30 transition-all font-medium flex items-center gap-1"><i class="fa-solid fa-location-dot text-[10px]"></i> Địa chỉ kho bảo hành</button>`;
+            }
+
+            chipsHtml += `<button onclick="quickAsk('Liên hệ tổng đài Sapo hỗ trợ')" class="bg-sapo-offblue hover:bg-sapo-blue/10 text-slate-700 px-3 py-1 rounded-xl border border-slate-200 transition-all font-medium flex items-center gap-1"><i class="fa-solid fa-phone text-[10px] text-sapo-green"></i> Gọi Tổng Đài 1900 6750</button>`;
+
+            const container = document.getElementById(`smart-chips-${msgId}`);
+            if (container) {
+                container.innerHTML = chipsHtml;
+                container.classList.remove("hidden");
+            }
+        }
+
         async function sendMessage(e) {
             e.preventDefault();
             const inputEl = document.getElementById("user-input");
@@ -440,6 +477,9 @@
                                 <div class="dot-flashing ml-2"></div><span class="ml-3">Đang phân tích 100% kho tri thức...</span>
                             </div>
                         </div>
+
+                        <!-- KHUNG ACTION CHIPS THÔNG MINH GỢI Ý HÀNH ĐỘNG (#1) -->
+                        <div id="smart-chips-${aiMsgId}" class="hidden flex flex-wrap gap-2 pt-2 border-t border-slate-100 text-xs"></div>
 
                         <!-- KHUNG NÚT ĐÁNH GIÁ THÔNG MINH -->
                         <div id="action-bar-${aiMsgId}" class="hidden pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
@@ -488,6 +528,8 @@
                 
                 chatHistory.push({ role: "model", text: fullText });
                 
+                generateSmartActionChips(aiMsgId, fullText);
+
                 const actionBar = document.getElementById(`action-bar-${aiMsgId}`);
                 if (actionBar) actionBar.classList.remove("hidden");
 
