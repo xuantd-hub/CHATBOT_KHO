@@ -739,12 +739,12 @@ def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) 
         }
     }
 
+    # Bỏ trường "text" dư thừa, chỉ giữ lại "cardsV2" để hiển thị 1 khung duy nhất
     return {
         "hostAppDataAction": {
             "chatDataAction": {
                 "createMessageAction": {
                     "message": {
-                        "text": formatted_text,
                         "cardsV2": [card_v2]
                     }
                 }
