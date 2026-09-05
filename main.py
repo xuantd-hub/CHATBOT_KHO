@@ -25,9 +25,6 @@ app.add_middleware(
 # CẤU HÌNH BIẾN MÔI TRƯỜNG & RAM CACHE & APPS SCRIPT WEBHOOK
 # ------------------------------------------------------------------------------
 SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag").strip()
-
-# ➔ ĐIỀN LINK APPS SCRIPT WEB APP CỦA ANH VÀO ĐÂY HOẶC ĐẶT BIẾN MÔI TRƯỜNG APPS_SCRIPT_URL
-# CODE SỬA CHUẨN:
 APPS_SCRIPT_URL = os.getenv("APPS_SCRIPT_URL", "https://script.google.com/macros/s/AKfycbz0lb86y3O6ynTkGK4yVMSsZrJSB4vKXOoh_cyu4g4JNm2Cr17k7DAQ21l3YoMwLYl9/exec").strip()
 
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "").strip()
@@ -99,7 +96,6 @@ async def discover_active_cerebras_models():
             model_ids = [m["id"] for m in res.json().get("data", [])]
             AVAILABLE_CEREBRAS_MODELS = model_ids
             
-            # Ưu tiên Gemma trước, khi Gemma biến mất khỏi API sẽ tự động nhảy sang Qwen
             preferred_models = ["gemma-4-31b", "qwen-3.8-27b", "qwen-2.5-32b", "llama-3.3-70b"]
             
             for pref in preferred_models:
@@ -222,10 +218,10 @@ def restore_exact_urls(text: str, top_matches: list) -> str:
 def fix_vietnamese_name_order(name: str) -> str:
     if not name: return ""
     parts = name.strip().split()
-    # Nếu tên có từ 2 từ trở lên (Ví dụ: "Xuân Thái Đình" -> chuyển "Xuân" về cuối)
     if len(parts) >= 2:
         return " ".join(parts[1:] + [parts[0]])
     return name
+
 def extract_user_text_and_identity(event: dict) -> tuple:
     user_email = ""
     user_name = ""
@@ -419,7 +415,6 @@ Nhãn:"""
     if new_intent in ["policy", "lan_setup", "driver_setup", "error_fix"]:
         return new_intent
 
-    # Lớp 2: Kế thừa Intent cho câu trả lời Model ngắn
     if len(words_in_latest) <= 4 and len(messages) >= 2:
         prev_ai_msg = ""
         for m in reversed(messages[:-1]):
@@ -658,26 +653,99 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
     return "⚠️ Hệ thống AI hiện đang bận hoặc quá tải lượt truy cập (Lỗi kết nối). Anh/chị vui lòng nhấn gửi lại câu hỏi sau vài giây giúp em nhé! 🙏"
 
 # ------------------------------------------------------------------------------
-# HÀM WRAPPER GỬI TIN NHẮN DÀNH CHO WORKSPACE ADD-ON
+# HÀM CHUẨN HÓA VĂN BẢN & WRAPPER CARD V2 DÀNH CHO GOOGLE CHAT (AN TOÀN 100%)
 # ------------------------------------------------------------------------------
-def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) -> dict:
-    clean_text = clean_thinking_process(text_message)
-    clean_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'\1 (\2)', clean_text)
-    clean_text = re.sub(r'\*{2,3}', '*', clean_text)
+def format_text_for_google_chat(text: str) -> tuple:
+    clean_text = clean_thinking_process(text)
     
-    if show_reset_note and "Em đã xóa bộ nhớ" not in clean_text:
+    buttons = []
+    extracted_urls = set()
+    url_matches = re.findall(r'https?://[^\s\)\>\]]+', clean_text)
+    
+    for url in url_matches:
+        clean_url = url.rstrip('.,;')
+        if clean_url in extracted_urls:
+            continue
+        extracted_urls.add(clean_url)
+        
+        url_lower = clean_url.lower()
+        if "youtube.com" in url_lower or "youtu.be" in url_lower or "video" in url_lower:
+            label = "🎥 Xem Video Hướng Dẫn"
+        elif "win" in url_lower or "driver_win" in url_lower:
+            label = "💻 Tải Driver Windows"
+        elif "mac" in url_lower or "driver_mac" in url_lower:
+            label = "🍏 Tải Driver Mac"
+        elif "drive.google.com" in url_lower or "doc" in url_lower or "guide" in url_lower:
+            label = "📄 Xem Tài Liệu Hướng Dẫn"
+        elif "anh" in url_lower or "img" in url_lower or "png" in url_lower or "jpg" in url_lower:
+            label = "🖼️ Xem Ảnh Minh Họa"
+        else:
+            label = "🔗 Mở Liên Kết Hướng Dẫn"
+            
+        buttons.append({
+            "text": label,
+            "onClick": {
+                "openLink": {
+                    "url": clean_url
+                }
+            }
+        })
+
+    formatted_text = re.sub(r'\[(.*?)\]\((https?://.*?)\)', r'<\2|\1>', clean_text)
+    formatted_text = re.sub(r'\*{2,3}(.*?)\*{2,3}', r'*\1*', formatted_text)
+    
+    return formatted_text, buttons
+
+
+def wrap_gsuite_addon_response(text_message: str, show_reset_note: bool = True) -> dict:
+    formatted_text, buttons = format_text_for_google_chat(text_message)
+    
+    if show_reset_note and "Em đã xóa bộ nhớ" not in formatted_text:
         footer_note = (
             "\n\n───────────────────────────────\n"
-            " 💡 _Mẹo: Bạn có thể nhắn \"xóa lịch sử\" hoặc \"bắt đầu cuộc trò chuyện mới\" khi cần hỏi sang thiết bị/chủ đề khác nhé!_"
+            "💡 _Mẹo: Bạn có thể nhắn \"xóa lịch sử\" khi cần hỏi sang thiết bị/chủ đề khác nhé!_"
         )
-        clean_text += footer_note
+        formatted_text += footer_note
+
+    widgets = [
+        {
+            "textParagraph": {
+                "text": formatted_text
+            }
+        }
+    ]
+    
+    if buttons:
+        widgets.append({
+            "buttonList": {
+                "buttons": buttons
+            }
+        })
+
+    card_v2 = {
+        "cardId": "sapo_assistant_reply_card",
+        "card": {
+            "header": {
+                "title": "Trợ Lý KHO Sapo",
+                "subtitle": "Hỗ trợ kỹ thuật 24/7",
+                "imageUrl": "https://bizweb.dktcdn.net/100/508/173/themes/1033891/assets/chat_icon_mess.svg?1785926985432",
+                "imageType": "CIRCLE"
+            },
+            "sections": [
+                {
+                    "widgets": widgets
+                }
+            ]
+        }
+    }
 
     return {
         "hostAppDataAction": {
             "chatDataAction": {
                 "createMessageAction": {
                     "message": {
-                        "text": clean_text
+                        "text": formatted_text,
+                        "cardsV2": [card_v2]
                     }
                 }
             }
