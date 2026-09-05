@@ -98,8 +98,11 @@ async def discover_active_cerebras_models():
         if res.status_code == 200:
             model_ids = [m["id"] for m in res.json().get("data", [])]
             AVAILABLE_CEREBRAS_MODELS = model_ids
-            gemma_prefs = ["gemma-4-31b", "gemma-4-31b-it", "google/gemma-4-31b-it", "gemma-31b-it", "llama-3.3-70b"]
-            for pref in gemma_prefs:
+            
+            # Ưu tiên Gemma trước, khi Gemma biến mất khỏi API sẽ tự động nhảy sang Qwen
+            preferred_models = ["gemma-4-31b", "qwen-3.8-27b", "qwen-2.5-32b", "llama-3.3-70b"]
+            
+            for pref in preferred_models:
                 if pref in model_ids:
                     CEREBRAS_MODEL = pref
                     return
