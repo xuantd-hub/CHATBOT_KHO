@@ -28,7 +28,7 @@ SHEET_ID = os.getenv("SHEET_ID", "1ZMq0mTiQTDiP92UPaOIv39Q17WJXDiuvrcyYwfs7_Ag")
 APPS_SCRIPT_URL = os.getenv("APPS_SCRIPT_URL", "https://script.google.com/macros/s/AKfycbz0lb86y3O6ynTkGK4yVMSsZrJSB4vKXOoh_cyu4g4JNm2Cr17k7DAQ21l3YoMwLYl9/exec").strip()
 
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "").strip()
-CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "gemma-4-31b").strip()
+CEREBRAS_MODEL = os.getenv("CEREBRAS_MODEL", "qwen-3.8-27b").strip()
 AVAILABLE_CEREBRAS_MODELS = []
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
