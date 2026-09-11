@@ -617,7 +617,7 @@ async def call_llm_with_history(system_instruction: str, messages_list: list) ->
             "messages": messages_payload,
             "temperature": 0.1,
             "top_p": 0.9,
-            "max_tokens": 2000
+            "max_tokens": 4096
         }
         try:
             res = await HTTP_CLIENT.post(url, headers=headers, json=payload, timeout=10.0)
