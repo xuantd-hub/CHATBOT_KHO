@@ -96,15 +96,18 @@ async def discover_active_cerebras_models():
             model_ids = [m["id"] for m in res.json().get("data", [])]
             AVAILABLE_CEREBRAS_MODELS = model_ids
             
-            preferred_models = ["gemma-4-31b", "qwen-3.8-27b", "qwen-2.5-32b", "llama-3.3-70b"]
+            preferred_models = ["qwen-3.8-27b","gemma-4-31b","qwen-2.5-32b", "llama-3.3-70b"]
             
             for pref in preferred_models:
                 if pref in model_ids:
                     CEREBRAS_MODEL = pref
+                    print(f"✅ Đã chọn Cerebras Model: {CEREBRAS_MODEL}")
                     return
             if model_ids: CEREBRAS_MODEL = model_ids[0]
+            print(f"✅ Tự động chọn Cerebras Model mặc định: {CEREBRAS_MODEL}")
     except Exception:
-        CEREBRAS_MODEL = "gemma-4-31b"
+        print(f"⚠️ Không thể lấy danh sách model Cerebras: {str(e)}")
+        #CEREBRAS_MODEL = "gemma-4-31b"
 
 async def fetch_single_tab_raw(tab: str):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab}"
